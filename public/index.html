@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Sales Proposal Agent</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <h1>Получете ориентировъчно предложение за минути</h1>
+        <p class="subtitle">
+          Публичен AI инструмент за бърз първоначален проект на търговско предложение.
+        </p>
+      </section>
+
+      <section class="card">
+        <form id="proposalForm">
+          <label for="leadText">Опишете вашето запитване</label>
+          <textarea
+            id="leadText"
+            name="leadText"
+            maxlength="4000"
+            required
+            placeholder="Напр. Имаме нужда от редизайн на корпоративен сайт с интеграция на CRM и SEO пакет..."
+          ></textarea>
+
+          <div class="grid">
+            <div>
+              <label for="company_name">Име на компания (по избор)</label>
+              <input id="company_name" name="company_name" type="text" maxlength="200" />
+            </div>
+            <div>
+              <label for="industry">Индустрия (по избор)</label>
+              <input id="industry" name="industry" type="text" maxlength="200" />
+            </div>
+            <div>
+              <label for="approximate_budget">Приблизителен бюджет (по избор)</label>
+              <input id="approximate_budget" name="approximate_budget" type="text" maxlength="200" />
+            </div>
+            <div>
+              <label for="expected_timeline">Очакван срок (по избор)</label>
+              <input id="expected_timeline" name="expected_timeline" type="text" maxlength="200" />
+            </div>
+          </div>
+
+          <button type="submit" id="generateBtn">Генерирай предложение</button>
+          <p id="loadingText" class="loading hidden">Генериране... моля, изчакайте.</p>
+          <p class="disclaimer">
+            Генерираното предложение е ориентировъчно и подлежи на потвърждение.
+          </p>
+        </form>
+      </section>
+
+      <section id="result" class="card hidden">
+        <h2>Резултат</h2>
+        <div id="sections"></div>
+        <div class="send-team-box">
+          <h3>Следваща стъпка</h3>
+          <p>
+            Ако искате реална оферта, използвайте бутона „Изпрати към нашия екип“ и изпратете
+            детайлите през контактната ни форма.
+          </p>
+          <a class="secondary-btn" href="#" onclick="alert('Тук можете да свържете контактна форма.'); return false;">
+            Изпрати към нашия екип
+          </a>
+        </div>
+      </section>
+
+      <p id="errorBox" class="error hidden"></p>
+    </main>
+
+    <script>
+      window.SITE_API_KEY = '{{SITE_API_KEY}}';
+    </script>
+    <script src="/public/app.js"></script>
+  </body>
+</html>
