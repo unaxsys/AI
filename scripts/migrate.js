@@ -1,22 +1,11 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const { Pool } = require('pg');
+const { initializeDb, DB_PATH } = require('../db');
 
-async function run() {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const client = await pool.connect();
-  try {
-    const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '001_init.sql'), 'utf8');
-    await client.query(sql);
-    console.log('Migration complete');
-  } finally {
-    client.release();
-    await pool.end();
-  }
-}
-
-run().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+initializeDb()
+  .then(() => {
+    console.log(`SQLite schema ready at ${DB_PATH}`);
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

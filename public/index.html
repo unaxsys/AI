@@ -4,66 +4,81 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anagami AI Core</title>
-    <link rel="stylesheet" href="/public/styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="loginView" class="center-card">
-      <div class="login-brand">
-        <img src="/public/logo.svg" class="logo" alt="Anagami logo" />
-        <h1>Anagami AI Core</h1>
-      </div>
-      <input id="email" type="email" placeholder="Email" />
-      <input id="password" type="password" placeholder="Password" />
-      <button id="loginBtn">Вход</button>
+      <h1>Anagami AI Core</h1>
+      <input id="loginEmail" placeholder="Email" />
+      <input id="loginPassword" type="password" placeholder="Password" />
+      <button id="loginBtn">Login</button>
       <p id="loginError" class="error"></p>
+      <a href="/offer.html">Публичен генератор</a>
     </div>
 
     <div id="appView" class="layout hidden">
       <header>
-        <div class="brand"><img src="/public/logo.svg" class="logo" alt="Anagami logo" /><span>Anagami AI Core</span></div>
-        <div id="userBadge"></div>
+        <div class="brand">Anagami AI Core</div>
+        <div>
+          <span id="whoami"></span>
+          <button id="logoutBtn">Logout</button>
+        </div>
       </header>
       <aside>
-        <button data-tab="email">Email Replies</button>
-        <button data-tab="offers">Offers</button>
-        <button data-tab="contracts">Contracts</button>
-        <button data-tab="support">Support</button>
-        <button data-tab="marketing">Marketing</button>
-        <button data-tab="recruiting">Recruiting</button>
-        <button data-tab="admin">Admin</button>
+        <button class="moduleBtn" data-module="email">Email Replies</button>
+        <button class="moduleBtn" data-module="offers">Offers</button>
+        <button class="moduleBtn" data-module="contracts">Contracts</button>
+        <button class="moduleBtn" data-module="support">Support</button>
+        <button class="moduleBtn" data-module="marketing">Marketing</button>
+        <button class="moduleBtn" data-module="recruiting">Recruiting</button>
+        <button class="moduleBtn" data-module="admin">Admin</button>
       </aside>
       <main>
-        <section id="passwordBox" class="panel hidden">
-          <h3>Смяна на парола (задължително)</h3>
-          <p>Този акаунт е с временна парола. Моля, въведете нова парола (мин. 8 символа), за да продължите.</p>
-          <div class="actions">
-            <input id="newPassword" type="password" placeholder="Нова парола" />
-            <button id="changePasswordBtn">Смени парола</button>
+        <div class="panel">
+          <h2 id="moduleTitle">Offers</h2>
+          <div class="toolbar">
+            <label for="language">Language</label>
+            <select id="language">
+              <option value="bg">Български</option>
+              <option value="en">English</option>
+            </select>
+            <input id="company" placeholder="Company" />
+            <input id="industry" placeholder="Industry" />
+            <input id="budget" placeholder="Budget" />
+            <input id="timeline" placeholder="Timeline" />
           </div>
-          <p id="passwordError" class="error"></p>
-        </section>
+          <textarea id="leadText" maxlength="4000" placeholder="Lead/request..."></textarea>
+          <div class="actions">
+            <button id="createTaskBtn">Create Task</button>
+            <button id="generateBtn">Generate Draft</button>
+            <button id="saveFinalBtn">Save Final</button>
+            <button id="approveBtn">Approve</button>
+            <input id="search" placeholder="Search history" />
+            <button id="refreshBtn">Refresh</button>
+          </div>
+          <div id="sixSections" class="sections"></div>
+          <p class="disclaimer">Guardrail: system generates drafts only. Never auto-sends emails.</p>
+        </div>
 
-        <div class="toolbar">
-          <input id="search" placeholder="Search history" />
-          <button id="refreshHistory">Refresh</button>
+        <div class="panel">
+          <h3>History</h3>
+          <ul id="history"></ul>
         </div>
-        <h2 id="tabTitle">Email Replies</h2>
-        <textarea id="taskInput" placeholder="Task input"></textarea>
-        <div class="actions">
-          <button id="createTask">Create Task</button>
-          <button id="generateDraft">Generate Draft</button>
-          <button id="saveFinal">Save Final</button>
-          <button id="approveTask">Approve</button>
-        </div>
-        <div id="sections"></div>
-        <h3>History</h3>
-        <ul id="history"></ul>
-        <div id="adminPanel" class="hidden">
-          <h3>Admin Panels</h3>
-          <p>Users, Prompts, Knowledge, Templates, Pricing CRUD are available via secured endpoints.</p>
+
+        <div id="adminPanel" class="panel hidden">
+          <h3>Admin Tools</h3>
+          <div class="actions">
+            <button id="loadUsers">Users</button>
+            <button id="loadPrompts">Prompts</button>
+            <button id="loadKnowledge">Knowledge</button>
+            <button id="loadTemplates">Templates</button>
+            <button id="loadPricing">Pricing</button>
+          </div>
+          <div id="adminCrud"></div>
         </div>
       </main>
     </div>
-    <script src="/public/app.js"></script>
+
+    <script src="/app.js"></script>
   </body>
 </html>
