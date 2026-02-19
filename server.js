@@ -77,6 +77,7 @@ async function seedAdmin() {
 async function runMigrations() {
   const sql = fs.readFileSync(path.join(__dirname, 'migrations', '001_init.sql'), 'utf8');
   await pool.query(sql);
+  await pool.query("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'manager'");
 }
 
 async function getActivePrompt(agentId) {
@@ -118,6 +119,7 @@ function parseLabeledSections(text, sectionTypes) {
 }
 
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
+app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'public/admin.html')));
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -261,13 +263,62 @@ app.post('/api/contracts', auth, requirePasswordUpdated, async (req, res) => {
 
 app.get('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
   const { rows } = await pool.query('SELECT id,email,display_name,role,is_active,created_at,last_login_at,must_change_password FROM users ORDER BY created_at DESC');
-  res.json(rows);
+  res.json({
+    ok: true,
+    users: rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      role: row.role,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      lastLoginAt: row.last_login_at,
+      mustChangePassword: row.must_change_password
+    }))
+  });
 });
 
 app.post('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const hash = await bcrypt.hash(String(req.body.password || 'Change123!'), 10);
-  const { rows } = await pool.query('INSERT INTO users(email,display_name,password_hash,role,is_active,must_change_password) VALUES($1,$2,$3,$4,true,$5) RETURNING id,email,display_name,role,is_active,must_change_password', [req.body.email, req.body.displayName, hash, req.body.role || 'user', Boolean(req.body.mustChangePassword)]);
-  res.status(201).json(rows[0]);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const firstName = String(req.body.firstName || '').trim();
+  const lastName = String(req.body.lastName || '').trim();
+  const gender = String(req.body.gender || '').trim().toLowerCase();
+  const role = String(req.body.role || 'user').trim().toLowerCase();
+  const displayName = String(req.body.displayName || `${firstName} ${lastName}`).trim();
+
+  if (!email || !firstName || !lastName || !gender || !displayName) {
+    return res.status(400).json({ ok: false, message: 'Missing required fields' });
+  }
+
+  if (!['admin', 'manager', 'user'].includes(role)) {
+    return res.status(400).json({ ok: false, message: 'Invalid role' });
+  }
+
+  if (!['male', 'female', 'other'].includes(gender)) {
+    return res.status(400).json({ ok: false, message: 'Invalid gender' });
+  }
+
+  const tempPassword = String(req.body.password || '').trim() || Math.random().toString(36).slice(-10) + 'A!';
+  const hash = await bcrypt.hash(tempPassword, 10);
+
+  const { rows } = await pool.query(
+    'INSERT INTO users(email,display_name,password_hash,role,is_active,must_change_password) VALUES($1,$2,$3,$4,true,true) RETURNING id,email,display_name,role,is_active,created_at,must_change_password',
+    [email, displayName, hash, role]
+  );
+
+  return res.status(201).json({
+    ok: true,
+    user: {
+      id: rows[0].id,
+      email: rows[0].email,
+      displayName: rows[0].display_name,
+      role: rows[0].role,
+      isActive: rows[0].is_active,
+      createdAt: rows[0].created_at,
+      mustChangePassword: rows[0].must_change_password
+    },
+    tempPassword
+  });
 });
 
 app.patch('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
@@ -277,6 +328,14 @@ app.patch('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async
     await pool.query('UPDATE users SET password_hash=$1, must_change_password=true, updated_at=now() WHERE id=$2', [hash, req.params.id]);
   }
   res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/reset-password', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const tempPassword = Math.random().toString(36).slice(-10) + 'A!';
+  const hash = await bcrypt.hash(tempPassword, 10);
+  const { rowCount } = await pool.query('UPDATE users SET password_hash=$1, must_change_password=true, updated_at=now() WHERE id=$2', [hash, req.params.id]);
+  if (!rowCount) return res.status(404).json({ ok: false, message: 'User not found' });
+  return res.json({ ok: true, tempPassword });
 });
 
 app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {

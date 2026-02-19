@@ -19,3 +19,13 @@ textarea#taskInput { width:100%; min-height:120px; }
 #sections textarea { width:100%; min-height:90px; margin-bottom:8px; }
 .error { color:#ff8f8f; min-height:20px; }
 .panel { background:var(--panel); border:1px solid #253353; border-radius:10px; padding:12px; margin-bottom:12px; }
+
+aside button.active { background: var(--accent); }
+.admin-form { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:10px; margin:14px 0; }
+.admin-form label { display:flex; flex-direction:column; gap:6px; font-size:14px; }
+.admin-form button { grid-column: 1 / -1; width:max-content; }
+.status-message { min-height:24px; margin:6px 0 12px; }
+.status-message.success { color:#8fffb2; }
+.admin-table { width:100%; border-collapse:collapse; background:#0f1628; border:1px solid #253353; border-radius:8px; overflow:hidden; }
+.admin-table th, .admin-table td { border-bottom:1px solid #253353; padding:10px; text-align:left; }
+.admin-table td:last-child { display:flex; gap:8px; flex-wrap:wrap; }

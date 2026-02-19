@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anagami AI Core · Admin</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <div class="brand"><img src="/public/logo.svg" class="logo" alt="Anagami logo" /><span>Anagami AI Core</span></div>
+        <div id="userBadge"></div>
+      </header>
+      <aside>
+        <button disabled>Email Replies</button>
+        <button disabled>Offers</button>
+        <button disabled>Contracts</button>
+        <button disabled>Support</button>
+        <button disabled>Marketing</button>
+        <button disabled>Recruiting</button>
+        <button class="active">Admin</button>
+      </aside>
+      <main>
+        <section class="panel">
+          <h2>User Management</h2>
+          <p>Създай потребител и управлявай достъпа от един екран.</p>
+
+          <form id="createUserForm" class="admin-form">
+            <label>Име
+              <input name="firstName" type="text" required />
+            </label>
+            <label>Фамилия
+              <input name="lastName" type="text" required />
+            </label>
+            <label>Пол
+              <select name="gender" required>
+                <option value="male">male</option>
+                <option value="female">female</option>
+                <option value="other">other</option>
+              </select>
+            </label>
+            <label>Имейл
+              <input name="email" type="email" required />
+            </label>
+            <label>Роля
+              <select name="role" required>
+                <option value="admin">admin</option>
+                <option value="manager">manager</option>
+                <option value="user" selected>user</option>
+              </select>
+            </label>
+            <label>Временна парола (по избор)
+              <input name="tempPassword" type="text" />
+            </label>
+            <button type="submit">Създай потребител</button>
+          </form>
+
+          <div id="adminMessage" class="status-message" aria-live="polite"></div>
+
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Име</th>
+                <th>Роля</th>
+                <th>Дата на създаване</th>
+                <th>Статус</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody"></tbody>
+          </table>
+        </section>
+      </main>
+    </div>
+
+    <script src="/public/admin.js"></script>
+  </body>
+</html>
