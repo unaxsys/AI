@@ -158,7 +158,7 @@
             </form>
             <p id="adminUserStatus" class="status-message"></p>
             <div class="admin-users-table-wrap">
-              <table class="admin-table" id="adminUsersTable">
+              <table class="admin-table admin-users-table" id="adminUsersTable">
                 <thead>
                   <tr>
                     <th>Име</th>
@@ -179,19 +179,21 @@
             <div class="actions">
               <button id="refreshSessionsBtn" type="button">Обнови сесиите</button>
             </div>
-            <table class="admin-table" id="adminSessionsTable">
-              <thead>
-                <tr>
-                  <th>Статус</th>
-                  <th>Потребител</th>
-                  <th>Email</th>
-                  <th>Логнат от</th>
-                  <th>Последна активност</th>
-                  <th>Продължителност</th>
-                </tr>
-              </thead>
-              <tbody id="adminSessionsList"></tbody>
-            </table>
+            <div class="admin-users-table-wrap">
+              <table class="admin-table admin-sessions-table" id="adminSessionsTable">
+                <thead>
+                  <tr>
+                    <th>Статус</th>
+                    <th>Потребител</th>
+                    <th>Email</th>
+                    <th>Логнат от</th>
+                    <th>Последна активност</th>
+                    <th>Продължителност</th>
+                  </tr>
+                </thead>
+                <tbody id="adminSessionsList"></tbody>
+              </table>
+            </div>
           </div>
 
           <div id="adminPlaceholder" class="admin-tab-pane hidden">

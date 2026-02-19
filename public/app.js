@@ -612,7 +612,7 @@ async function loadAdminUsers() {
 
   res.users.forEach((u) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? I18N[currentLanguage].table.active : I18N[currentLanguage].table.inactive}</td><td></td>`;
+    tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? I18N[currentLanguage].table.active : I18N[currentLanguage].table.inactive}</td><td class="actions-cell"></td>`;
     const actionsTd = tr.querySelector('td:last-child');
     const actions = document.createElement('div');
     actions.className = 'table-actions';
@@ -671,6 +671,14 @@ function formatDuration(seconds) {
   return `${h}h ${m}m ${s}s`;
 }
 
+function formatDateTimeCell(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  const date = d.toLocaleDateString();
+  const time = d.toLocaleTimeString();
+  return `<div class="datetime-cell"><span>${date}</span><small>${time}</small></div>`;
+}
+
 async function loadAdminSessions() {
   if (!meState || meState.role !== 'admin') return;
   const res = await api('/api/admin/sessions');
@@ -685,8 +693,8 @@ async function loadAdminSessions() {
       <td><div class="session-status"><span class="status-dot ${session.isOnline ? 'online' : 'offline'}"></span>${statusText}</div></td>
       <td>${session.displayName}</td>
       <td>${session.email}</td>
-      <td>${session.lastLoginAt ? new Date(session.lastLoginAt).toLocaleString() : '-'}</td>
-      <td>${session.lastSeenAt ? new Date(session.lastSeenAt).toLocaleString() : '-'}</td>
+      <td>${formatDateTimeCell(session.lastLoginAt)}</td>
+      <td>${formatDateTimeCell(session.lastSeenAt)}</td>
       <td>${formatDuration(session.sessionDurationSec)}</td>
     `;
     list.appendChild(tr);
