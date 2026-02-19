@@ -5,7 +5,7 @@ Node 18+ internal/public generator platform using **Express + PostgreSQL + Vanil
 ## Features
 
 - Staff authentication with JWT (stored in `sessionStorage` client-side).
-- Roles: `admin`, `manager`, `agent`, `viewer`.
+- Roles: `admin`, `user`.
 - Mandatory task language selection (`bg` default, `en` supported).
 - Public no-login generator page: `/offer.html`.
 - Shared generation output format (strict six keys):

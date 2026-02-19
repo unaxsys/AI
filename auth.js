@@ -2,10 +2,8 @@ const jwt = require('jsonwebtoken');
 const { get } = require('./db');
 
 const ROLE_LEVEL = {
-  viewer: 1,
-  agent: 2,
-  manager: 3,
-  admin: 4
+  user: 1,
+  admin: 2
 };
 
 function signToken(user) {

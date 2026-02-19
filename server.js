@@ -122,7 +122,7 @@ app.get('/api/modules', requireAuth, (_req, res) => {
   res.json(DEFAULT_MODULES);
 });
 
-app.post('/api/tasks', requireAuth, requireRole('agent'), requireBodyField('leadText'), async (req, res) => {
+app.post('/api/tasks', requireAuth, requireRole('user'), requireBodyField('leadText'), async (req, res) => {
   const moduleCode = clampText(req.body.module, 50).toLowerCase();
   if (!assertModule(moduleCode)) return res.status(400).json({ error: 'Invalid module' });
 
@@ -146,7 +146,7 @@ app.post('/api/tasks', requireAuth, requireRole('agent'), requireBodyField('lead
   res.json({ id: result.lastID });
 });
 
-app.post('/api/tasks/:id/generate', requireAuth, requireRole('agent'), async (req, res) => {
+app.post('/api/tasks/:id/generate', requireAuth, requireRole('user'), async (req, res) => {
   const taskId = Number(req.params.id);
   const task = await get('SELECT * FROM tasks WHERE id=?', [taskId]);
   if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -249,7 +249,7 @@ app.get('/api/tasks/:id', requireAuth, async (req, res) => {
   res.json({ task, output });
 });
 
-app.patch('/api/tasks/:id/final', requireAuth, requireRole('agent'), async (req, res) => {
+app.patch('/api/tasks/:id/final', requireAuth, requireRole('user'), async (req, res) => {
   const taskId = Number(req.params.id);
   const language = normalizeLanguage(req.body.language);
   const payload = {
@@ -280,7 +280,7 @@ app.patch('/api/tasks/:id/final', requireAuth, requireRole('agent'), async (req,
   res.json({ ok: true });
 });
 
-app.post('/api/tasks/:id/approve', requireAuth, requireRole('manager'), async (req, res) => {
+app.post('/api/tasks/:id/approve', requireAuth, requireRole('admin'), async (req, res) => {
   await run('UPDATE tasks SET status=\'approved\', approved_by=?, approved_at=NOW(), updated_at=NOW() WHERE id=?', [
     req.user.id,
     Number(req.params.id)
@@ -300,7 +300,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
   const name = clampText(req.body.name, 255);
   const role = clampText(req.body.role, 20);
   const password = clampText(req.body.password, 255);
-  if (!['admin', 'manager', 'agent', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (!['admin', 'user'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (!email || !name || !password) return res.status(400).json({ error: 'Missing fields' });
 
   const hash = await bcrypt.hash(password, 10);
@@ -366,7 +366,7 @@ function registerCrudRoutes(basePath, minRole, tableName, fieldConfig) {
   });
 }
 
-registerCrudRoutes('/api/admin/prompts', 'manager', 'prompts', [
+registerCrudRoutes('/api/admin/prompts', 'admin', 'prompts', [
   { name: 'module', max: 40 },
   { name: 'language', max: 5 },
   { name: 'version', max: 10 },
@@ -375,7 +375,7 @@ registerCrudRoutes('/api/admin/prompts', 'manager', 'prompts', [
   { name: 'created_by', max: 20 }
 ]);
 
-registerCrudRoutes('/api/admin/knowledge', 'manager', 'knowledge_snippets', [
+registerCrudRoutes('/api/admin/knowledge', 'admin', 'knowledge_snippets', [
   { name: 'title', max: 255 },
   { name: 'body', max: 4000 },
   { name: 'tags', max: 255 },
@@ -383,7 +383,7 @@ registerCrudRoutes('/api/admin/knowledge', 'manager', 'knowledge_snippets', [
   { name: 'created_by', max: 20 }
 ]);
 
-registerCrudRoutes('/api/admin/templates', 'manager', 'templates', [
+registerCrudRoutes('/api/admin/templates', 'admin', 'templates', [
   { name: 'module', max: 40 },
   { name: 'language', max: 5 },
   { name: 'template_type', max: 40 },
@@ -393,7 +393,7 @@ registerCrudRoutes('/api/admin/templates', 'manager', 'templates', [
   { name: 'created_by', max: 20 }
 ]);
 
-registerCrudRoutes('/api/admin/pricing', 'manager', 'pricing_rules', [
+registerCrudRoutes('/api/admin/pricing', 'admin', 'pricing_rules', [
   { name: 'module', max: 40 },
   { name: 'service', max: 255 },
   { name: 'min_price', max: 40 },
@@ -403,7 +403,7 @@ registerCrudRoutes('/api/admin/pricing', 'manager', 'pricing_rules', [
   { name: 'created_by', max: 20 }
 ]);
 
-app.get('/api/usage/local', requireAuth, requireRole('manager'), async (req, res) => {
+app.get('/api/usage/local', requireAuth, requireRole('admin'), async (req, res) => {
   const totals = await get('SELECT COUNT(*) as requests FROM usage_logs');
   const last24h = await get("SELECT COUNT(*) as requests FROM usage_logs WHERE created_at >= NOW() - INTERVAL '24 hours'");
   const tokens = await get('SELECT COALESCE(SUM(tokens_in),0) as inTokens, COALESCE(SUM(tokens_out),0) as outTokens FROM usage_logs');

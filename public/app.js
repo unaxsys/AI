@@ -27,7 +27,7 @@ function updateModuleVisibility() {
   const isAdminModule = currentModule === 'admin';
   document.getElementById('taskWorkspace').classList.toggle('hidden', isAdminModule);
   document.getElementById('historyPanel').classList.toggle('hidden', isAdminModule);
-  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || !['admin', 'manager'].includes(me?.role));
+  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || me?.role !== 'admin');
 }
 
 function getToken() {
@@ -87,6 +87,15 @@ async function loadMe() {
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
+
+    if (me.role === 'admin') {
+      currentModule = 'admin';
+      document.getElementById('moduleTitle').textContent = 'Admin';
+      document.querySelectorAll('.moduleBtn').forEach((btn) => {
+        btn.classList.toggle('hidden', btn.dataset.module !== 'admin');
+      });
+    }
+
     renderSections({}, document.getElementById('language').value);
     updateModuleVisibility();
     if (currentModule !== 'admin') loadHistory();
@@ -166,6 +175,25 @@ async function loadCrud(resource, fields) {
   form.className = 'crudForm';
   const values = {};
   fields.forEach((f) => {
+    if (resource === 'users' && f === 'role') {
+      const select = document.createElement('select');
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = 'role';
+      select.appendChild(defaultOption);
+      ['admin', 'user'].forEach((role) => {
+        const option = document.createElement('option');
+        option.value = role;
+        option.textContent = role;
+        select.appendChild(option);
+      });
+      select.onchange = () => {
+        values[f] = select.value;
+      };
+      form.appendChild(select);
+      return;
+    }
+
     const input = document.createElement('input');
     input.placeholder = f;
     input.oninput = () => {
