@@ -4,6 +4,8 @@ body { margin:0; background:var(--bg); color:var(--text); }
 .hidden { display:none!important; }
 .center-card { width:360px; margin:8vh auto; background:var(--panel); border:1px solid #253353; border-radius:14px; padding:24px; display:flex; flex-direction:column; gap:10px; }
 .logo { width:38px; height:38px; }
+.login-brand { display:flex; align-items:center; gap:10px; }
+.login-brand h1 { margin:0; }
 input, textarea { background:#0f1628; color:var(--text); border:1px solid #2b3f68; border-radius:8px; padding:10px; }
 button { background:var(--accent); color:white; border:none; border-radius:8px; padding:10px 12px; cursor:pointer; }
 .layout { display:grid; grid-template-columns: 220px 1fr; grid-template-rows:60px 1fr; min-height:100vh; }
