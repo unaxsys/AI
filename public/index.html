@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
   <body>
+    <button id="themeToggle" class="theme-toggle" title="Смяна на тема" aria-label="Смяна на тема">🌙</button>
+
     <div id="loginView" class="center-card">
       <div class="login-brand">
         <img src="/public/logo.svg" class="logo" alt="Anagami logo" />
@@ -21,47 +23,181 @@
     <div id="appView" class="layout hidden">
       <header>
         <div class="brand"><img src="/public/logo.svg" class="logo" alt="Anagami logo" /><span>Anagami AI Core</span></div>
-        <div id="userBadge"></div>
+        <div class="user-menu-wrap">
+          <button id="userMenuBtn" class="user-menu-btn"></button>
+          <div id="userMenu" class="user-menu hidden">
+            <button data-user-action="profile">Профил</button>
+            <button data-user-action="settings">Настройки</button>
+            <button data-user-action="password">Смяна на паролата</button>
+            <button data-user-action="logout">Изход</button>
+          </div>
+        </div>
       </header>
-      <aside>
+      <aside id="sideNav">
         <button data-tab="email">Email Replies</button>
         <button data-tab="offers">Offers</button>
         <button data-tab="contracts">Contracts</button>
         <button data-tab="support">Support</button>
         <button data-tab="marketing">Marketing</button>
         <button data-tab="recruiting">Recruiting</button>
-        <button data-tab="admin">Admin</button>
+        <button data-tab="escalations">Escalations</button>
+        <button data-tab="sales">Продажби</button>
+        <button data-tab="accounting">Accounting Issues</button>
+        <button data-tab="tax">Tax Issues</button>
+        <button data-tab="cases">Cases (NRA/Companies)</button>
+        <button data-tab="procedures">Rules & Procedures</button>
+        <button id="adminTabBtn" data-tab="admin">Admin</button>
       </aside>
       <main>
         <section id="passwordBox" class="panel hidden">
           <h3>Смяна на парола (задължително)</h3>
           <p>Този акаунт е с временна парола. Моля, въведете нова парола (мин. 8 символа), за да продължите.</p>
-          <div class="actions">
-            <input id="newPassword" type="password" placeholder="Нова парола" />
+          <div class="password-grid">
+            <div class="password-field-wrap">
+              <input id="newPassword" type="password" placeholder="Нова парола" />
+              <button id="toggleNewPassword" type="button" class="password-eye" aria-label="Покажи/скрий новата парола">👁️</button>
+            </div>
+            <div class="password-field-wrap">
+              <input id="confirmPassword" type="password" placeholder="Потвърди паролата" />
+              <button id="toggleConfirmPassword" type="button" class="password-eye" aria-label="Покажи/скрий потвърждението">👁️</button>
+            </div>
             <button id="changePasswordBtn">Смени парола</button>
           </div>
           <p id="passwordError" class="error"></p>
         </section>
 
-        <div class="toolbar">
-          <input id="search" placeholder="Search history" />
-          <button id="refreshHistory">Refresh</button>
-        </div>
-        <h2 id="tabTitle">Email Replies</h2>
-        <textarea id="taskInput" placeholder="Task input"></textarea>
-        <div class="actions">
-          <button id="createTask">Create Task</button>
-          <button id="generateDraft">Generate Draft</button>
-          <button id="saveFinal">Save Final</button>
-          <button id="approveTask">Approve</button>
-        </div>
-        <div id="sections"></div>
-        <h3>History</h3>
-        <ul id="history"></ul>
-        <div id="adminPanel" class="hidden">
+        <section id="profilePanel" class="panel hidden">
+          <h3>Профил</h3>
+          <form id="profileForm" class="admin-form">
+            <label>Име<input name="firstName" /></label>
+            <label>Фамилия<input name="lastName" /></label>
+            <label>Показвано име<input name="displayName" /></label>
+            <label>Телефон<input name="phone" /></label>
+            <label>Позиция<input name="jobTitle" /></label>
+            <label>Компания<input name="company" /></label>
+            <label style="grid-column:1/-1;">Био<textarea name="bio" rows="3"></textarea></label>
+            <label>Снимка на профил<input id="avatarInput" type="file" accept="image/*" /></label>
+            <button type="submit">Запази профила</button>
+          </form>
+          <p id="profileStatus" class="status-message"></p>
+        </section>
+
+        <section id="settingsPanel" class="panel hidden">
+          <h3>Настройки</h3>
+          <div class="actions">
+            <label>Език
+              <select id="languageSelect">
+                <option value="bg">Български</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <button id="saveSettingsBtn">Запази настройки</button>
+          </div>
+          <p id="settingsStatus" class="status-message"></p>
+        </section>
+
+        <section id="workspacePanel">
+          <div class="toolbar">
+            <input id="search" placeholder="Search history" />
+            <button id="refreshHistory">Refresh</button>
+          </div>
+          <h2 id="tabTitle">Email Replies</h2>
+          <textarea id="taskInput" placeholder="Task input"></textarea>
+          <div class="actions">
+            <button id="createTask">Create Task</button>
+            <button id="generateDraft">Generate Draft</button>
+            <button id="saveFinal">Save Final</button>
+            <button id="approveTask">Approve</button>
+          </div>
+          <div id="sections"></div>
+          <h3>History</h3>
+          <ul id="history"></ul>
+        </section>
+
+        <section id="adminPanel" class="panel hidden">
           <h3>Admin Panels</h3>
-          <p>Users, Prompts, Knowledge, Templates, Pricing CRUD are available via secured endpoints.</p>
-        </div>
+          <div class="admin-tabs" id="adminTabs">
+            <button data-admin-tab="users" class="active">Users</button>
+            <button data-admin-tab="prompts">Prompts</button>
+            <button data-admin-tab="knowledge">Knowledge</button>
+            <button data-admin-tab="templates">Templates</button>
+            <button data-admin-tab="pricing">Pricing</button>
+            <button data-admin-tab="agents">Agents</button>
+            <button data-admin-tab="sessions">Sessions</button>
+            <button data-admin-tab="audit">Audit</button>
+          </div>
+
+          <div id="adminUsersTab" class="admin-tab-pane">
+            <h4>Създаване на потребител</h4>
+            <form id="adminCreateUserForm" class="admin-form admin-user-form">
+              <label class="field-short">Email<input name="email" type="email" required /></label>
+              <label class="field-short">Име<input name="firstName" required /></label>
+              <label class="field-short">Фамилия<input name="lastName" required /></label>
+              <label class="field-short">Пол
+                <select name="gender">
+                  <option value="male">male</option>
+                  <option value="female">female</option>
+                  <option value="other">other</option>
+                </select>
+              </label>
+              <label class="field-short">Роля
+                <select name="role">
+                  <option value="user">user</option>
+                  <option value="manager">manager</option>
+                  <option value="admin">admin</option>
+                </select>
+              </label>
+              <label class="password-inline">Парола
+                <div class="inline-field-actions">
+                  <input name="password" id="adminGeneratedPassword" placeholder="Генерирай или въведи" />
+                  <button type="button" id="generatePasswordBtn">Генерирай</button>
+                  <button type="button" id="copyPasswordBtn">Копирай</button>
+                </div>
+              </label>
+              <button type="submit">Създай потребител</button>
+            </form>
+            <p id="adminUserStatus" class="status-message"></p>
+            <div class="admin-users-table-wrap">
+              <table class="admin-table" id="adminUsersTable">
+                <thead>
+                  <tr>
+                    <th>Име</th>
+                    <th>Email</th>
+                    <th>Роля</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          
+          <div id="adminSessionsTab" class="admin-tab-pane hidden">
+            <h4 id="sessionsTitle">Потребителски сесии</h4>
+            <div class="actions">
+              <button id="refreshSessionsBtn" type="button">Обнови сесиите</button>
+            </div>
+            <table class="admin-table" id="adminSessionsTable">
+              <thead>
+                <tr>
+                  <th>Статус</th>
+                  <th>Потребител</th>
+                  <th>Email</th>
+                  <th>Логнат от</th>
+                  <th>Последна активност</th>
+                  <th>Продължителност</th>
+                </tr>
+              </thead>
+              <tbody id="adminSessionsList"></tbody>
+            </table>
+          </div>
+
+          <div id="adminPlaceholder" class="admin-tab-pane hidden">
+            <p>Избраният административен таб е готов за свързване към съществуващите защитени API endpoints на платформата.</p>
+          </div>
+        </section>
       </main>
     </div>
     <script src="/public/app.js"></script>
