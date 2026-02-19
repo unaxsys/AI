@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 
-const { initDb, run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
+const { run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
 const { signToken, requireAuth, requireRole } = require('./auth');
 const { generateStructuredOutput } = require('./openai');
 const { publicGenerateLimiter, loginLimiter } = require('./rateLimit');
@@ -479,9 +479,9 @@ app.use((err, _req, res, _next) => {
 (async () => {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
   try {
-    await initDb();
+    await get('SELECT 1');
   } catch (error) {
-    console.error('Database initialization failed:', error);
+    console.error('Database connection failed:', error);
     process.exit(1);
   }
   app.listen(PORT, () => {
