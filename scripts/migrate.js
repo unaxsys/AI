@@ -1,7 +1,5 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const { Pool } = require('pg');
+const { initDb, closeDb } = require('../db');
 
 function buildConnectionConfig() {
   if (process.env.DATABASE_URL) {
