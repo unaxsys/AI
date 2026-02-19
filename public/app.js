@@ -137,6 +137,13 @@ async function login() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const error = new Error(body.error || 'Login failed');
+      error.status = response.status;
+      throw error;
+    }
 
     if (!response.ok) {
       const error = new Error(body.error || 'Login failed');
