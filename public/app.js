@@ -10,9 +10,17 @@ async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(path, { ...options, headers });
+
+  const request = (url) => fetch(url, { ...options, headers });
+  let res = await request(path);
+
+  // Fallback for deployments hosted behind a sub-path where absolute /api routes return 404.
+  if (res.status === 404 && typeof path === 'string' && path.startsWith('/api/')) {
+    res = await request(path.slice(1));
+  }
+
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error || 'Request failed');
+  if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
   return payload;
 }
 
