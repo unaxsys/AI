@@ -39,6 +39,7 @@ async function auth(req, res, next) {
     const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true', [payload.sub]);
     if (!rows[0]) return res.status(401).json({ error: 'Unauthorized' });
     req.user = rows[0];
+    await pool.query('UPDATE users SET last_seen_at=now() WHERE id=$1', [rows[0].id]);
     next();
   } catch {
     res.status(401).json({ error: 'Unauthorized' });
@@ -130,7 +131,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   if (!user || !user.is_active) return res.status(401).json({ error: 'Invalid credentials' });
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-  await pool.query('UPDATE users SET last_login_at=now() WHERE id=$1', [user.id]);
+  await pool.query('UPDATE users SET last_login_at=now(), last_seen_at=now() WHERE id=$1', [user.id]);
   res.json({
     token: signToken(user),
     user: {
@@ -334,6 +335,34 @@ app.get('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (_req
       mustChangePassword: row.must_change_password
     }))
   });
+});
+
+app.get('/api/admin/sessions', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, email, display_name, role, is_active, last_login_at, last_seen_at,
+            (last_seen_at IS NOT NULL AND last_seen_at > now() - interval '5 minutes') AS is_online
+     FROM users
+     ORDER BY display_name ASC`
+  );
+
+  const sessions = rows.map((row) => {
+    const durationSec = row.is_online && row.last_login_at
+      ? Math.max(0, Math.floor((Date.now() - new Date(row.last_login_at).getTime()) / 1000))
+      : null;
+    return {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      role: row.role,
+      isActive: row.is_active,
+      isOnline: row.is_online,
+      lastLoginAt: row.last_login_at,
+      lastSeenAt: row.last_seen_at,
+      sessionDurationSec: durationSec
+    };
+  });
+
+  return res.json({ ok: true, sessions });
 });
 
 app.post('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (req, res) => {

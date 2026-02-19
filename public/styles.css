@@ -83,6 +83,12 @@ aside button.active { background: var(--accent); }
 .btn-danger { background:#d9534f; }
 .btn-warning { background:#f0ad4e; color:#1b1b1b; }
 
+
+.session-status { display:flex; align-items:center; gap:8px; }
+.status-dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
+.status-dot.online { background:#2fbf66; }
+.status-dot.offline { background:#d9534f; }
+
 @media (max-width: 1200px) {
   .admin-user-form { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
 }

@@ -43,7 +43,8 @@ const I18N = {
     generate: 'Генерирай',
     copy: 'Копирай',
     createUser: 'Създай потребител',
-    table: { name: 'Име', email: 'Email', role: 'Роля', status: 'Статус', actions: 'Действия', active: 'активен', inactive: 'неактивен' }
+    table: { name: 'Име', email: 'Email', role: 'Роля', status: 'Статус', actions: 'Действия', active: 'активен', inactive: 'неактивен' },
+    sessions: { title: 'Потребителски сесии', refresh: 'Обнови сесиите', user: 'Потребител', loginFrom: 'Логнат от', lastSeen: 'Последна активност', duration: 'Продължителност', online: 'Онлайн', offline: 'Офлайн' }
   },
   en: {
     loginEmail: 'Email', loginPassword: 'Password', loginBtn: 'Login',
@@ -55,7 +56,8 @@ const I18N = {
     adminPanels: 'Admin Panels', createUserTitle: 'Create user',
     labels: { firstName: 'First name', lastName: 'Last name', displayName: 'Display name', phone: 'Phone', jobTitle: 'Job title', company: 'Company', bio: 'Bio', avatar: 'Profile picture', email: 'Email', gender: 'Gender', role: 'Role', password: 'Password' },
     generate: 'Generate', copy: 'Copy', createUser: 'Create user',
-    table: { name: 'Name', email: 'Email', role: 'Role', status: 'Status', actions: 'Actions', active: 'active', inactive: 'inactive' }
+    table: { name: 'Name', email: 'Email', role: 'Role', status: 'Status', actions: 'Actions', active: 'active', inactive: 'inactive' },
+    sessions: { title: 'User sessions', refresh: 'Refresh sessions', user: 'User', loginFrom: 'Logged in from', lastSeen: 'Last activity', duration: 'Duration', online: 'Online', offline: 'Offline' }
   }
 };
 
@@ -149,6 +151,20 @@ function translateUI(language) {
     th[2].textContent = tr.table.role;
     th[3].textContent = tr.table.status;
     th[4].textContent = tr.table.actions;
+  }
+
+  const sessionsTitle = document.getElementById('sessionsTitle');
+  if (sessionsTitle) sessionsTitle.textContent = tr.sessions.title;
+  const refreshSessionsBtn = document.getElementById('refreshSessionsBtn');
+  if (refreshSessionsBtn) refreshSessionsBtn.textContent = tr.sessions.refresh;
+  const sTh = document.querySelectorAll('#adminSessionsTable thead th');
+  if (sTh.length >= 6) {
+    sTh[0].textContent = tr.table.status;
+    sTh[1].textContent = tr.sessions.user;
+    sTh[2].textContent = tr.table.email;
+    sTh[3].textContent = tr.sessions.loginFrom;
+    sTh[4].textContent = tr.sessions.lastSeen;
+    sTh[5].textContent = tr.sessions.duration;
   }
 }
 
@@ -285,7 +301,7 @@ async function loadMe() {
 
     setActiveSidebar();
     updateWorkspaceVisibility();
-    if (me.role === 'admin') loadAdminUsers();
+    if (me.role === 'admin') { loadAdminUsers(); loadAdminSessions(); }
   } catch {
     logout();
   }
@@ -646,12 +662,48 @@ async function loadAdminUsers() {
   });
 }
 
+
+function formatDuration(seconds) {
+  if (seconds === null || Number.isNaN(seconds)) return '-';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${h}h ${m}m ${s}s`;
+}
+
+async function loadAdminSessions() {
+  if (!meState || meState.role !== 'admin') return;
+  const res = await api('/api/admin/sessions');
+  const list = document.getElementById('adminSessionsList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  res.sessions.forEach((session) => {
+    const tr = document.createElement('tr');
+    const statusText = session.isOnline ? I18N[currentLanguage].sessions.online : I18N[currentLanguage].sessions.offline;
+    tr.innerHTML = `
+      <td><div class="session-status"><span class="status-dot ${session.isOnline ? 'online' : 'offline'}"></span>${statusText}</div></td>
+      <td>${session.displayName}</td>
+      <td>${session.email}</td>
+      <td>${session.lastLoginAt ? new Date(session.lastLoginAt).toLocaleString() : '-'}</td>
+      <td>${session.lastSeenAt ? new Date(session.lastSeenAt).toLocaleString() : '-'}</td>
+      <td>${formatDuration(session.sessionDurationSec)}</td>
+    `;
+    list.appendChild(tr);
+  });
+}
+
+document.getElementById('refreshSessionsBtn').onclick = loadAdminSessions;
+
 document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((btn) => {
   btn.onclick = () => {
     document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((b) => b.classList.toggle('active', b === btn));
     const isUsers = btn.dataset.adminTab === 'users';
+    const isSessions = btn.dataset.adminTab === 'sessions';
     document.getElementById('adminUsersTab').classList.toggle('hidden', !isUsers);
-    document.getElementById('adminPlaceholder').classList.toggle('hidden', isUsers);
+    document.getElementById('adminSessionsTab').classList.toggle('hidden', !isSessions);
+    document.getElementById('adminPlaceholder').classList.toggle('hidden', isUsers || isSessions);
+    if (isSessions) loadAdminSessions();
   };
 });
 

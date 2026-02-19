@@ -117,6 +117,7 @@
             <button data-admin-tab="templates">Templates</button>
             <button data-admin-tab="pricing">Pricing</button>
             <button data-admin-tab="agents">Agents</button>
+            <button data-admin-tab="sessions">Sessions</button>
             <button data-admin-tab="audit">Audit</button>
           </div>
 
@@ -164,6 +165,27 @@
                 <tbody id="adminUsersList"></tbody>
               </table>
             </div>
+          </div>
+
+          
+          <div id="adminSessionsTab" class="admin-tab-pane hidden">
+            <h4 id="sessionsTitle">Потребителски сесии</h4>
+            <div class="actions">
+              <button id="refreshSessionsBtn" type="button">Обнови сесиите</button>
+            </div>
+            <table class="admin-table" id="adminSessionsTable">
+              <thead>
+                <tr>
+                  <th>Статус</th>
+                  <th>Потребител</th>
+                  <th>Email</th>
+                  <th>Логнат от</th>
+                  <th>Последна активност</th>
+                  <th>Продължителност</th>
+                </tr>
+              </thead>
+              <tbody id="adminSessionsList"></tbody>
+            </table>
           </div>
 
           <div id="adminPlaceholder" class="admin-tab-pane hidden">
