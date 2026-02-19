@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anagami Public Offer Generator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="offer-page">
+      <h1>Anagami Public Offer Generator</h1>
+      <p class="disclaimer">
+        Disclaimer: This generator creates draft content only. It does not send emails automatically. Personal data is not stored by default.
+      </p>
+      <div class="offer-grid">
+        <textarea id="leadText" maxlength="4000" placeholder="Lead text"></textarea>
+        <div>
+          <input id="company" placeholder="Company" />
+          <input id="industry" placeholder="Industry" />
+          <input id="budget" placeholder="Budget" />
+          <input id="timeline" placeholder="Timeline" />
+          <select id="language">
+            <option value="bg">Български</option>
+            <option value="en">English</option>
+          </select>
+          <input id="turnstileToken" placeholder="Turnstile token (optional)" />
+          <button id="generatePublic">Generate</button>
+        </div>
+      </div>
+      <div id="publicError" class="error"></div>
+      <div id="publicOutput" class="offer-output"></div>
+    </div>
+    <script src="/offer.js"></script>
+  </body>
+</html>
