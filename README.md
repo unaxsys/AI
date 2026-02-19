@@ -1,64 +1,55 @@
-# Public AI Sales Proposal Agent
+# Anagami AI Core
 
-Публичен (без login) AI агент, вграден в уеб страница, който генерира ориентировъчно търговско предложение на база клиентско запитване.
+Internal multi-agent platform scaffold with Node.js + Express + PostgreSQL.
 
-## Стек
-- Backend: Node.js + Express
-- Frontend: Vanilla JS + HTML + CSS
-- Storage: SQLite (само технически логове, до последните 100 заявки)
-- Rate limiting: express-rate-limit
+## Features
+- JWT auth with email/password (token in `sessionStorage` on client).
+- Roles: `admin`, `user`.
+- Agents tabs: Email Replies, Offers, Contracts, Support, Marketing, Recruiting, Admin.
+- Task workflow: create -> generate draft (OpenAI + active prompt version) -> edit -> approve -> history/search.
+- Normalized PostgreSQL schema, **no json/jsonb columns**.
+- Templates and generated files in PostgreSQL `BYTEA`.
+- Export endpoints for offers/contracts with DOCX/PDF pipeline (PDF conversion via LibreOffice + `/tmp` ephemeral files).
+- Admin endpoints for users, prompts, knowledge, templates, pricing skeleton.
 
-## Изисквания
-- Node.js 18+
-- `OPENAI_API_KEY`
-- `SITE_API_KEY`
-
-## Инсталация и пускане
-1. Инсталирайте зависимостите:
+## Setup
+1. Create DB and copy env:
+   ```bash
+   cp .env.example .env
+   ```
+2. Install dependencies:
    ```bash
    npm install
    ```
-2. Създайте `.env` файл по шаблон от `.env.example`.
-3. Стартирайте сървъра:
+3. Run migrations:
    ```bash
-   OPENAI_API_KEY=... SITE_API_KEY=... PORT=8787 npm start
+   npm run migrate
    ```
-4. Отворете:
-   - `http://localhost:8787`
+4. Start server:
+   ```bash
+   npm start
+   ```
+5. Open `http://localhost:8787`.
 
-## API
-### `POST /api/generate`
-Headers:
-- `Content-Type: application/json`
-- `x-site-api-key: <SITE_API_KEY>`
+## Placeholder mapping example (DOCX)
+Use placeholders from DB fields such as:
+- Offer: `{{client_name}}`, `{{client_company}}`, `{{subtotal}}`, `{{total}}`.
+- Repeating rows (offer items): row template with `{{line_no}}`, `{{description}}`, `{{qty}}`, `{{unit_price}}`, `{{line_total}}`.
+- Contract: `{{client_name}}`, `{{contract_type}}`, `{{terms}}`.
 
-Body:
-```json
-{
-  "leadText": "...",
-  "company_name": "...",
-  "industry": "...",
-  "approximate_budget": "...",
-  "expected_timeline": "..."
-}
-```
+## API highlights
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET /api/agents`
+- `POST /api/tasks`
+- `POST /api/tasks/:id/generate`
+- `PATCH /api/tasks/:id/sections`
+- `POST /api/tasks/:id/approve`
+- `POST /api/offers/:id/export?format=docx|pdf`
+- `POST /api/contracts/:id/export?format=docx|pdf`
+- `GET /api/files/:id/download`
 
-### Валидации и защита
-- Rate limit: 10 заявки/IP/час
-- Максимална дължина на `leadText`: 4000 символа
-- Базови spam проверки
-- user-friendly грешки (без stack traces)
-- Няма auto-send към email/CRM
-- Няма дългосрочно съхранение на съдържание от запитвания
-
-## Файлова структура
-- `server.js`
-- `openai.js`
-- `rateLimit.js`
-- `public/index.html`
-- `public/app.js`
-- `public/styles.css`
-- `.env.example`
-
-## Забележка за сигурност
-`SITE_API_KEY` е прост shared secret за MVP публичен инструмент и не е пълна защита самостоятелно.
+## Notes
+- If pricing catalogs are empty, offers keep pricing section as `TBD / requires admin pricing setup`.
+- Non-admin users are blocked from admin/pricing endpoints.
+- Offers/contracts tabs are scaffold-ready; admin can configure templates/pricing later.
