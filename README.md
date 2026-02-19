@@ -1,90 +1,61 @@
 # Anagami AI Core
 
-Node 18+ internal/public generator platform using **Express + PostgreSQL + Vanilla JS**.
+Internal multi-agent platform scaffold with Node.js + Express + PostgreSQL.
 
 ## Features
+- JWT auth with email/password (token in `sessionStorage` on client).
+- Roles: `admin`, `user`.
+- Agents tabs: Email Replies, Offers, Contracts, Support, Marketing, Recruiting, Admin.
+- Task workflow: create -> generate draft (OpenAI + active prompt version) -> edit -> approve -> history/search.
+- Normalized PostgreSQL schema, **no json/jsonb columns**.
+- Templates and generated files in PostgreSQL `BYTEA`.
+- Export endpoints for offers/contracts with DOCX/PDF pipeline (PDF conversion via LibreOffice + `/tmp` ephemeral files).
+- Admin endpoints for users, prompts, knowledge, templates, pricing skeleton.
 
-- Staff authentication with JWT (stored in `sessionStorage` client-side).
-- Roles: `admin`, `manager`, `agent`, `viewer`.
-- Mandatory task language selection (`bg` default, `en` supported).
-- Public no-login generator page: `/offer.html`.
-- Shared generation output format (strict six keys):
-  - `analysis`
-  - `service`
-  - `pricing`
-  - `proposalDraft`
-  - `emailDraft`
-  - `upsell`
-- Prompt / Knowledge / Templates / Pricing CRUD with role-protected endpoints.
-- Optional Turnstile verification on public endpoint.
-- Public guardrails:
-  - 10 req/IP/hour on `/api/public/generate`
-  - max input 4000 chars
-  - CORS allow-list: `https://anagami.bg`, `https://www.anagami.bg`
-  - no full lead-text storage unless `STORE_PUBLIC_REQUESTS=true`
-- `/api/health` and `/api/usage/local` monitoring endpoints.
 
-## Environment
+## Default admin login
+- Email: `ogi.stoev80@gmail.com`
+- Password: `12345678`
+- On first login (and after admin password reset), the UI forces password change from Profile section before any agent/admin actions.
 
-Copy `.env.example` to `.env` and fill values.
+## Setup
+1. Create DB and copy env:
+   ```bash
+   cp .env.example .env
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Run migrations:
+   ```bash
+   npm run migrate
+   ```
+4. Start server:
+   ```bash
+   npm start
+   ```
+5. Open `http://localhost:8789`.
 
-Required:
-- `OPENAI_API_KEY`
-- `JWT_SECRET`
-- database config via either `DATABASE_URL` or `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS`
-
-## Run commands
-
-```bash
-npm install
-npm run migrate
-npm start
-```
-
-Open:
-- Staff app: `http://localhost:8789/`
-- Public generator: `http://localhost:8789/offer.html`
-
-## Deploy on /opt/ai (pm2)
-
-```bash
-cd /opt/ai
-npm install
-npm run migrate
-pm2 restart anagami-ai-core --update-env
-```
-
-If the app is not registered in pm2 yet:
-
-```bash
-cd /opt/ai
-pm2 start server.js --name anagami-ai-core --update-env
-```
+## Placeholder mapping example (DOCX)
+Use placeholders from DB fields such as:
+- Offer: `{{client_name}}`, `{{client_company}}`, `{{subtotal}}`, `{{total}}`.
+- Repeating rows (offer items): row template with `{{line_no}}`, `{{description}}`, `{{qty}}`, `{{unit_price}}`, `{{line_total}}`.
+- Contract: `{{client_name}}`, `{{contract_type}}`, `{{terms}}`.
 
 ## API highlights
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET /api/agents`
+- `POST /api/tasks`
+- `POST /api/tasks/:id/generate`
+- `PATCH /api/tasks/:id/sections`
+- `POST /api/tasks/:id/approve`
+- `POST /api/offers/:id/export?format=docx|pdf`
+- `POST /api/contracts/:id/export?format=docx|pdf`
+- `GET /api/files/:id/download`
 
-- Auth:
-  - `POST /api/auth/login`
-  - `GET /api/auth/me`
-- Staff tasks:
-  - `POST /api/tasks`
-  - `POST /api/tasks/:id/generate`
-  - `PATCH /api/tasks/:id/final`
-  - `POST /api/tasks/:id/approve`
-  - `GET /api/tasks`, `GET /api/tasks/:id`
-- Public:
-  - `POST /api/public/generate`
-- Admin:
-  - `GET/POST /api/admin/users`
-  - `PATCH /api/admin/users/:id/status`
-  - `POST /api/admin/users/:id/reset-password`
-  - CRUD: `/api/admin/prompts`, `/api/admin/knowledge`, `/api/admin/templates`, `/api/admin/pricing`
-- Monitoring:
-  - `GET /api/health`
-  - `GET /api/usage/local`
-
-## Security notes
-
-- Never auto-send emails (draft-only workflow).
-- API key is never exposed to frontend.
-- All secured endpoints require JWT and role checks.
+## Notes
+- If pricing catalogs are empty, offers keep pricing section as `TBD / requires admin pricing setup`.
+- Non-admin users are blocked from admin/pricing endpoints.
+- Offers/contracts tabs are scaffold-ready; admin can configure templates/pricing later.

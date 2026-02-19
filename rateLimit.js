@@ -1,23 +1,16 @@
 const rateLimit = require('express-rate-limit');
 
-const publicGenerateLimiter = rateLimit({
+const proposalLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  limit: 10,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Too many requests from this IP. Please try again in about an hour.'
+    error:
+      'Прекалено много заявки от този IP адрес. Опитайте отново след около час.'
   }
 });
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
 module.exports = {
-  publicGenerateLimiter,
-  loginLimiter
+  proposalLimiter
 };
