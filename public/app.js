@@ -1,163 +1,247 @@
-let token = sessionStorage.getItem('jwt') || '';
-let currentTab = 'email';
+const tokenKey = 'anagami_token';
+const i18n = {
+  bg: {
+    analysis: 'Анализ',
+    service: 'Услуга',
+    pricing: 'Ценообразуване',
+    proposalDraft: 'Проект на предложение',
+    emailDraft: 'Проект на имейл',
+    upsell: 'Допълнителни предложения'
+  },
+  en: {
+    analysis: 'Analysis',
+    service: 'Service',
+    pricing: 'Pricing',
+    proposalDraft: 'Proposal Draft',
+    emailDraft: 'Email Draft',
+    upsell: 'Upsell'
+  }
+};
+const sectionKeys = ['analysis', 'service', 'pricing', 'proposalDraft', 'emailDraft', 'upsell'];
+
+let me = null;
+let currentModule = 'offers';
 let currentTaskId = null;
-let mustChangePassword = false;
 
-const loginView = document.getElementById('loginView');
-const appView = document.getElementById('appView');
+function updateModuleVisibility() {
+  const isAdminModule = currentModule === 'admin';
+  document.getElementById('taskWorkspace').classList.toggle('hidden', isAdminModule);
+  document.getElementById('historyPanel').classList.toggle('hidden', isAdminModule);
+  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || !['admin', 'manager'].includes(me?.role));
+}
 
-async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+function getToken() {
+  return sessionStorage.getItem(tokenKey);
+}
+
+async function api(url, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(url, { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
 
-  const urls = [path];
-  if (typeof path === 'string' && path.startsWith('/api/')) {
-    const basePath = new URL(document.baseURI).pathname.replace(/[^/]*$/, '');
-    urls.push(path.slice(1));
-    urls.push(`${basePath}${path.slice(1)}`);
+function renderSections(data = {}, lang = 'bg') {
+  const root = document.getElementById('sixSections');
+  root.innerHTML = '';
+  for (const key of sectionKeys) {
+    const label = document.createElement('h4');
+    label.textContent = i18n[lang][key];
+    const ta = document.createElement('textarea');
+    ta.dataset.key = key;
+    ta.value = data[key] || '';
+    root.appendChild(label);
+    root.appendChild(ta);
   }
+}
 
-  const uniqueUrls = [...new Set(urls)];
-  let res = null;
-  for (const url of uniqueUrls) {
-    // eslint-disable-next-line no-await-in-loop
-    res = await fetch(url, { ...options, headers });
-    if (res.status !== 404) break;
-  }
-
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const attempted = uniqueUrls.join(' -> ');
-    throw new Error(payload.error || `HTTP ${res.status} (${attempted})`);
-  }
+function gatherSections() {
+  const payload = {};
+  document.querySelectorAll('#sixSections textarea').forEach((el) => {
+    payload[el.dataset.key] = el.value;
+  });
   return payload;
 }
 
-function setWorkEnabled(enabled) {
-  ['createTask', 'generateDraft', 'saveFinal', 'approveTask', 'refreshHistory', 'search', 'taskInput'].forEach((id) => {
-    document.getElementById(id).disabled = !enabled;
-  });
+async function login() {
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+    sessionStorage.setItem(tokenKey, data.token);
+    await loadMe();
+  } catch (err) {
+    document.getElementById('loginError').textContent = err.message;
+  }
 }
 
 async function loadMe() {
-  if (!token) return;
   try {
-    const me = await api('/api/auth/me');
-    loginView.classList.add('hidden');
-    appView.classList.remove('hidden');
-    document.getElementById('userBadge').textContent = `${me.displayName} (${me.role})`;
-    document.getElementById('adminPanel').classList.toggle('hidden', me.role !== 'admin');
-    mustChangePassword = Boolean(me.mustChangePassword);
-    document.getElementById('passwordBox').classList.toggle('hidden', !mustChangePassword);
-    setWorkEnabled(!mustChangePassword);
-    if (!mustChangePassword) loadHistory();
-  } catch {
-    sessionStorage.removeItem('jwt');
-    token = '';
+    me = await api('/api/auth/me');
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appView').classList.remove('hidden');
+    document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
+    renderSections({}, document.getElementById('language').value);
+    updateModuleVisibility();
+    if (currentModule !== 'admin') loadHistory();
+  } catch (_e) {
+    document.getElementById('loginView').classList.remove('hidden');
+    document.getElementById('appView').classList.add('hidden');
   }
 }
-
-document.getElementById('loginBtn').onclick = async () => {
-  try {
-    const data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: email.value, password: password.value }) });
-    token = data.token;
-    sessionStorage.setItem('jwt', token);
-    loadMe();
-  } catch (e) {
-    document.getElementById('loginError').textContent = e.message;
-  }
-};
-
-document.getElementById('changePasswordBtn').onclick = async () => {
-  try {
-    await api('/api/profile/change-password', {
-      method: 'POST',
-      body: JSON.stringify({ newPassword: document.getElementById('newPassword').value })
-    });
-    document.getElementById('passwordError').textContent = '';
-    document.getElementById('passwordBox').classList.add('hidden');
-    mustChangePassword = false;
-    setWorkEnabled(true);
-    alert('Паролата е сменена успешно.');
-    loadHistory();
-  } catch (e) {
-    document.getElementById('passwordError').textContent = e.message;
-  }
-};
-
-document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = () => {
-  currentTab = b.dataset.tab;
-  document.getElementById('tabTitle').textContent = b.textContent;
-  currentTaskId = null;
-  document.getElementById('sections').innerHTML = '';
-  if (!mustChangePassword) loadHistory();
-});
-
-document.getElementById('createTask').onclick = async () => {
-  const agents = await api('/api/agents');
-  const agent = agents.find((a) => a.code === currentTab);
-  if (!agent) return alert('Agent disabled/not found');
-  const t = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ agentId: agent.id, inputText: taskInput.value }) });
-  currentTaskId = t.id;
-  loadHistory();
-};
-
-document.getElementById('generateDraft').onclick = async () => {
-  if (!currentTaskId) return alert('Create/open task first');
-  const data = await api(`/api/tasks/${currentTaskId}/generate`, { method: 'POST' });
-  renderSections(data.sections);
-};
-
-document.getElementById('saveFinal').onclick = async () => {
-  if (!currentTaskId) return;
-  const sections = [...document.querySelectorAll('#sections textarea')].map((t) => ({ sectionType: t.dataset.section, contentFinal: t.value }));
-  await api(`/api/tasks/${currentTaskId}/sections`, { method: 'PATCH', body: JSON.stringify({ sections }) });
-  alert('Saved');
-};
-
-document.getElementById('approveTask').onclick = async () => {
-  if (!currentTaskId) return;
-  await api(`/api/tasks/${currentTaskId}/approve`, { method: 'POST' });
-  alert('Approved');
-  loadHistory();
-};
-
-document.getElementById('refreshHistory').onclick = loadHistory;
 
 async function loadHistory() {
-  const agents = await api('/api/agents');
-  const agent = agents.find((a) => a.code === currentTab);
-  if (!agent) return;
-  const q = encodeURIComponent(document.getElementById('search').value || '');
-  const rows = await api(`/api/tasks?agentId=${agent.id}&q=${q}`);
-  const list = document.getElementById('history');
-  list.innerHTML = '';
-  rows.forEach((r) => {
+  if (currentModule === 'admin') return;
+  const q = document.getElementById('search').value;
+  const rows = await api(`/api/tasks?module=${encodeURIComponent(currentModule)}&q=${encodeURIComponent(q)}`);
+  const history = document.getElementById('history');
+  history.innerHTML = '';
+  rows.forEach((row) => {
     const li = document.createElement('li');
-    li.textContent = `#${r.id} [${r.status}] ${r.input_text.slice(0, 80)}`;
+    li.textContent = `#${row.id} [${row.language}] [${row.status}] ${row.lead_text.slice(0, 80)}`;
     li.onclick = async () => {
-      currentTaskId = r.id;
-      const data = await api(`/api/tasks/${r.id}`);
-      taskInput.value = data.task.input_text;
-      renderSections(data.sections.map((s) => ({ section_type: s.section_type, content_draft: s.content_final || s.content_draft || '' })));
+      const details = await api(`/api/tasks/${row.id}`);
+      currentTaskId = row.id;
+      document.getElementById('leadText').value = details.task.lead_text || '';
+      document.getElementById('company').value = details.task.company || '';
+      document.getElementById('industry').value = details.task.industry || '';
+      document.getElementById('budget').value = details.task.budget || '';
+      document.getElementById('timeline').value = details.task.timeline || '';
+      document.getElementById('language').value = details.task.language;
+      renderSections(details.output || {}, details.task.language);
     };
-    list.appendChild(li);
+    history.appendChild(li);
   });
 }
 
-function renderSections(sections) {
-  const el = document.getElementById('sections');
-  el.innerHTML = '';
-  sections.forEach((s) => {
-    const label = document.createElement('label');
-    label.textContent = s.section_type;
-    const ta = document.createElement('textarea');
-    ta.dataset.section = s.section_type;
-    ta.value = s.content_final || s.content_draft || '';
-    el.appendChild(label);
-    el.appendChild(ta);
+async function createTask() {
+  const payload = {
+    module: currentModule,
+    language: document.getElementById('language').value,
+    leadText: document.getElementById('leadText').value,
+    company: document.getElementById('company').value,
+    industry: document.getElementById('industry').value,
+    budget: document.getElementById('budget').value,
+    timeline: document.getElementById('timeline').value
+  };
+  const created = await api('/api/tasks', { method: 'POST', body: JSON.stringify(payload) });
+  currentTaskId = created.id;
+  await loadHistory();
+}
+
+async function generate() {
+  if (!currentTaskId) await createTask();
+  const data = await api(`/api/tasks/${currentTaskId}/generate`, { method: 'POST', body: '{}' });
+  renderSections(data, document.getElementById('language').value);
+  await loadHistory();
+}
+
+async function saveFinal() {
+  if (!currentTaskId) return;
+  const payload = gatherSections();
+  payload.language = document.getElementById('language').value;
+  await api(`/api/tasks/${currentTaskId}/final`, { method: 'PATCH', body: JSON.stringify(payload) });
+  alert('Saved');
+}
+
+async function approveTask() {
+  if (!currentTaskId) return;
+  await api(`/api/tasks/${currentTaskId}/approve`, { method: 'POST', body: '{}' });
+  alert('Approved');
+  loadHistory();
+}
+
+async function loadCrud(resource, fields) {
+  const rows = await api(`/api/admin/${resource}`);
+  const root = document.getElementById('adminCrud');
+  root.innerHTML = '';
+
+  const form = document.createElement('div');
+  form.className = 'crudForm';
+  const values = {};
+  fields.forEach((f) => {
+    const input = document.createElement('input');
+    input.placeholder = f;
+    input.oninput = () => {
+      values[f] = input.value;
+    };
+    form.appendChild(input);
+  });
+  const createBtn = document.createElement('button');
+  createBtn.textContent = 'Create';
+  createBtn.onclick = async () => {
+    await api(`/api/admin/${resource}`, { method: 'POST', body: JSON.stringify(values) });
+    await loadCrud(resource, fields);
+  };
+  form.appendChild(createBtn);
+  root.appendChild(form);
+
+  rows.forEach((row) => {
+    const item = document.createElement('div');
+    item.className = 'crudItem';
+    item.textContent = JSON.stringify(row);
+    const del = document.createElement('button');
+    del.textContent = 'Delete';
+    del.onclick = async () => {
+      await api(`/api/admin/${resource}/${row.id}`, { method: 'DELETE' });
+      await loadCrud(resource, fields);
+    };
+    item.appendChild(del);
+
+    if (resource === 'users') {
+      const toggle = document.createElement('button');
+      toggle.textContent = row.is_active ? 'Disable' : 'Enable';
+      toggle.onclick = async () => {
+        await api(`/api/admin/users/${row.id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive: row.is_active ? 0 : 1 }) });
+        await loadCrud(resource, fields);
+      };
+      const reset = document.createElement('button');
+      reset.textContent = 'Reset Password';
+      reset.onclick = async () => {
+        const password = prompt('New password');
+        if (!password) return;
+        await api(`/api/admin/users/${row.id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) });
+      };
+      item.appendChild(toggle);
+      item.appendChild(reset);
+    }
+
+    root.appendChild(item);
   });
 }
+
+document.getElementById('loginBtn').onclick = login;
+document.getElementById('logoutBtn').onclick = () => {
+  sessionStorage.removeItem(tokenKey);
+  location.reload();
+};
+document.getElementById('createTaskBtn').onclick = createTask;
+document.getElementById('generateBtn').onclick = generate;
+document.getElementById('saveFinalBtn').onclick = saveFinal;
+document.getElementById('approveBtn').onclick = approveTask;
+document.getElementById('refreshBtn').onclick = loadHistory;
+document.getElementById('language').onchange = (e) => renderSections(gatherSections(), e.target.value);
+
+document.querySelectorAll('.moduleBtn').forEach((btn) => {
+  btn.onclick = () => {
+    currentModule = btn.dataset.module;
+    currentTaskId = null;
+    document.getElementById('moduleTitle').textContent = btn.textContent;
+    updateModuleVisibility();
+    if (currentModule !== 'admin') loadHistory();
+  };
+});
+
+document.getElementById('loadUsers').onclick = () => loadCrud('users', ['email', 'name', 'role', 'password']);
+document.getElementById('loadPrompts').onclick = () => loadCrud('prompts', ['module', 'language', 'version', 'content', 'is_active']);
+document.getElementById('loadKnowledge').onclick = () => loadCrud('knowledge', ['title', 'body', 'tags', 'language']);
+document.getElementById('loadTemplates').onclick = () => loadCrud('templates', ['module', 'language', 'template_type', 'title', 'body', 'is_active']);
+document.getElementById('loadPricing').onclick = () => loadCrud('pricing', ['module', 'service', 'min_price', 'max_price', 'currency', 'notes']);
 
 loadMe();
