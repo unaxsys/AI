@@ -58,19 +58,14 @@ function adminOnly(req, res, next) {
 }
 
 async function seedAdmin() {
-  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [DEFAULT_ADMIN_EMAIL]);
-  if (!rows[0]) {
-    await pool.query(
-      'INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password) VALUES ($1,$2,$3,$4,true,true)',
-      [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
-    );
-    return;
-  }
+  if (rows[0]) return;
 
+  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   await pool.query(
-    'UPDATE users SET password_hash=$1, role=$2, is_active=true, must_change_password=true, updated_at=now() WHERE email=$3',
-    [hash, 'admin', DEFAULT_ADMIN_EMAIL]
+    `INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password)
+     VALUES ($1,$2,$3,$4,true,true)`,
+    [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
   );
 }
 
