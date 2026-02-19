@@ -68,6 +68,24 @@ aside button.active { background: var(--accent); }
   padding:0;
 }
 
+
+.admin-user-form { grid-template-columns: repeat(3, minmax(180px, 260px)); align-items:end; }
+.admin-user-form .field-short { max-width:260px; }
+.admin-user-form .password-inline { min-width:320px; }
+.inline-field-actions { display:flex; gap:8px; align-items:center; }
+.inline-field-actions input { min-width:220px; }
+.admin-user-form > button[type="submit"] { align-self:end; }
+.admin-users-table-wrap { margin-top:10px; overflow:auto; }
+.admin-table th:last-child, .admin-table td:last-child { min-width:240px; }
+.table-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.table-actions button { padding:6px 10px; font-size:12px; }
+.btn-danger { background:#d9534f; }
+.btn-warning { background:#f0ad4e; color:#1b1b1b; }
+
+@media (max-width: 1200px) {
+  .admin-user-form { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+}
+
 .theme-toggle {
   position:fixed;
   left:14px;

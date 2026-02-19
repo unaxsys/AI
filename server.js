@@ -400,6 +400,16 @@ app.post('/api/admin/users/:id/reset-password', auth, requirePasswordUpdated, ad
   return res.json({ ok: true, tempPassword });
 });
 
+
+app.delete('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ ok: false, message: 'Cannot delete current admin user' });
+  }
+  const { rowCount } = await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+  if (!rowCount) return res.status(404).json({ ok: false, message: 'User not found' });
+  return res.json({ ok: true });
+});
+
 app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
   const { rows } = await pool.query('SELECT apv.*, a.code agent_code FROM agent_prompt_versions apv JOIN agents a ON a.id=apv.agent_id ORDER BY apv.created_at DESC LIMIT 200');
   res.json(rows);

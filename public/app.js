@@ -15,7 +15,6 @@ async function api(path, options = {}) {
   const urls = [path];
   if (typeof path === 'string' && path.startsWith('/api/')) {
     const basePath = new URL(document.baseURI).pathname.replace(/[^/]*$/, '');
-    urls.push(path.slice(1));
     urls.push(`${basePath}${path.slice(1)}`);
   }
 
@@ -47,6 +46,10 @@ function applyTheme(theme) {
   document.body.classList.toggle('theme-light', normalized === 'light');
   document.getElementById('themeToggle').textContent = normalized === 'light' ? '☀️' : '🌙';
   localStorage.setItem('theme', normalized);
+}
+
+function applyLanguage(language) {
+  document.documentElement.lang = language === 'en' ? 'en' : 'bg';
 }
 
 function setWorkEnabled(enabled) {
@@ -97,6 +100,8 @@ function logout() {
   meState = null;
   loginView.classList.remove('hidden');
   appView.classList.add('hidden');
+  const adminBtn = document.getElementById('adminTabBtn');
+  if (adminBtn) adminBtn.classList.add('hidden');
 }
 
 async function loadMe() {
@@ -107,8 +112,12 @@ async function loadMe() {
     loginView.classList.add('hidden');
     appView.classList.remove('hidden');
     document.getElementById('userMenuBtn').textContent = `${me.displayName} (${me.role})`;
+    const adminBtn = document.getElementById('adminTabBtn');
+    if (adminBtn) adminBtn.classList.toggle('hidden', me.role !== 'admin');
+    if (me.role !== 'admin' && currentTab === 'admin') currentTab = 'email';
     mustChangePassword = Boolean(me.mustChangePassword);
     applyTheme(me.theme || localStorage.getItem('theme') || 'dark');
+    applyLanguage(me.language || 'bg');
     renderProfile(me);
 
     if (mustChangePassword) {
@@ -352,6 +361,7 @@ document.getElementById('saveSettingsBtn').onclick = async () => {
     });
     document.getElementById('settingsStatus').textContent = 'Настройките са запазени.';
     document.getElementById('settingsStatus').className = 'status-message success';
+    await loadMe();
   } catch (e) {
     document.getElementById('settingsStatus').textContent = e.message;
     document.getElementById('settingsStatus').className = 'status-message';
@@ -385,15 +395,79 @@ document.getElementById('adminCreateUserForm').onsubmit = async (e) => {
   }
 };
 
+async function resetUserPassword(userId) {
+  const data = await api(`/api/admin/users/${userId}/reset-password`, { method: 'POST' });
+  document.getElementById('adminUserStatus').textContent = `Нова временна парола: ${data.tempPassword}`;
+  document.getElementById('adminUserStatus').className = 'status-message success';
+}
+
+async function toggleUserActive(user) {
+  await api(`/api/admin/users/${user.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive: !user.isActive })
+  });
+}
+
+async function deleteUser(user) {
+  if (!confirm(`Сигурни ли сте, че искате да изтриете ${user.displayName}?`)) return;
+  await api(`/api/admin/users/${user.id}`, { method: 'DELETE' });
+}
+
 async function loadAdminUsers() {
   if (!meState || meState.role !== 'admin') return;
   const res = await api('/api/admin/users');
   const list = document.getElementById('adminUsersList');
   list.innerHTML = '';
+
   res.users.forEach((u) => {
-    const li = document.createElement('li');
-    li.textContent = `${u.displayName} (${u.email}) - ${u.role} ${u.isActive ? 'active' : 'inactive'}`;
-    list.appendChild(li);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? 'active' : 'inactive'}</td><td></td>`;
+    const actionsTd = tr.querySelector('td:last-child');
+    const actions = document.createElement('div');
+    actions.className = 'table-actions';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Ресет парола';
+    resetBtn.onclick = async () => {
+      try {
+        await resetUserPassword(u.id);
+      } catch (e) {
+        document.getElementById('adminUserStatus').textContent = e.message;
+        document.getElementById('adminUserStatus').className = 'status-message';
+      }
+    };
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn-warning';
+    toggleBtn.textContent = u.isActive ? 'Деактивирай' : 'Активирай';
+    toggleBtn.onclick = async () => {
+      try {
+        await toggleUserActive(u);
+        await loadAdminUsers();
+      } catch (e) {
+        document.getElementById('adminUserStatus').textContent = e.message;
+        document.getElementById('adminUserStatus').className = 'status-message';
+      }
+    };
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-danger';
+    deleteBtn.textContent = 'Изтрий';
+    deleteBtn.onclick = async () => {
+      try {
+        await deleteUser(u);
+        await loadAdminUsers();
+      } catch (e) {
+        document.getElementById('adminUserStatus').textContent = e.message;
+        document.getElementById('adminUserStatus').className = 'status-message';
+      }
+    };
+
+    actions.appendChild(resetBtn);
+    actions.appendChild(toggleBtn);
+    actions.appendChild(deleteBtn);
+    actionsTd.appendChild(actions);
+    list.appendChild(tr);
   });
 }
 
