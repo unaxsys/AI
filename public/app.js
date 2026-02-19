@@ -27,7 +27,7 @@ function updateModuleVisibility() {
   const isAdminModule = currentModule === 'admin';
   document.getElementById('taskWorkspace').classList.toggle('hidden', isAdminModule);
   document.getElementById('historyPanel').classList.toggle('hidden', isAdminModule);
-  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || !['admin', 'manager'].includes(me?.role));
+  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || me?.role !== 'admin');
 }
 
 function getToken() {
@@ -92,6 +92,17 @@ function gatherSections() {
   return payload;
 }
 
+function generateStrongPassword(length = 16) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*';
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  let password = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    password += alphabet[bytes[i] % alphabet.length];
+  }
+  return password;
+}
+
 async function login() {
   const loginError = document.getElementById('loginError');
   loginError.textContent = '';
@@ -100,37 +111,44 @@ async function login() {
   const password = document.getElementById('loginPassword').value;
 
   try {
-    const data = await fetch('/api/auth/login', {
+    const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
-    }).then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const error = new Error(body.error || 'Login failed');
-        error.status = response.status;
-        throw error;
-      }
-      return body;
     });
+    const body = await response.json().catch(() => ({}));
 
-    if (!data?.token) {
+    if (!response.ok) {
+      const error = new Error(body.error || 'Login failed');
+      error.status = response.status;
+      throw error;
+    }
+
+    if (!body?.token) {
       throw new Error('Missing auth token');
     }
 
-    setToken(data.token);
-    await bootstrapAuth();
+    setToken(body.token);
+    showApp();
+    await loadMe();
   } catch (err) {
+    if (err.status === 401) {
+      clearToken();
+    }
     showLogin(err.message || 'Login failed');
   }
 }
 
 async function loadMe() {
-  me = await api('/api/auth/me');
+  me = await api('/api/auth/me', {
+    headers: { Authorization: `Bearer ${getToken()}` }
+  });
   document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
   renderSections({}, document.getElementById('language').value);
   updateModuleVisibility();
-  if (currentModule !== 'admin') loadHistory();
+  if (currentModule !== 'admin') {
+    await loadHistory();
+  }
 }
 
 async function bootstrapAuth() {
@@ -215,30 +233,98 @@ async function approveTask() {
   loadHistory();
 }
 
+function createUserForm(root) {
+  const form = document.createElement('div');
+  form.className = 'crudForm';
+
+  const emailInput = document.createElement('input');
+  emailInput.placeholder = 'email';
+  form.appendChild(emailInput);
+
+  const nameInput = document.createElement('input');
+  nameInput.placeholder = 'name';
+  form.appendChild(nameInput);
+
+  const roleSelect = document.createElement('select');
+  ['admin', 'user'].forEach((role) => {
+    const option = document.createElement('option');
+    option.value = role;
+    option.textContent = role;
+    roleSelect.appendChild(option);
+  });
+  form.appendChild(roleSelect);
+
+  const languageSelect = document.createElement('select');
+  [
+    { value: 'bg', label: 'Български' },
+    { value: 'en', label: 'English' }
+  ].forEach((language) => {
+    const option = document.createElement('option');
+    option.value = language.value;
+    option.textContent = language.label;
+    languageSelect.appendChild(option);
+  });
+  form.appendChild(languageSelect);
+
+  const passwordInput = document.createElement('input');
+  passwordInput.placeholder = 'password';
+  passwordInput.type = 'text';
+  form.appendChild(passwordInput);
+
+  const generatePasswordBtn = document.createElement('button');
+  generatePasswordBtn.textContent = 'Generate Password';
+  generatePasswordBtn.type = 'button';
+  generatePasswordBtn.onclick = () => {
+    passwordInput.value = generateStrongPassword();
+  };
+  form.appendChild(generatePasswordBtn);
+
+  const createBtn = document.createElement('button');
+  createBtn.textContent = 'Create';
+  createBtn.onclick = async () => {
+    const payload = {
+      email: emailInput.value,
+      name: nameInput.value,
+      role: roleSelect.value,
+      language: languageSelect.value,
+      password: passwordInput.value
+    };
+    await api('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) });
+    await loadCrud('users', []);
+  };
+  form.appendChild(createBtn);
+
+  root.appendChild(form);
+}
+
 async function loadCrud(resource, fields) {
   const rows = await api(`/api/admin/${resource}`);
   const root = document.getElementById('adminCrud');
   root.innerHTML = '';
 
-  const form = document.createElement('div');
-  form.className = 'crudForm';
-  const values = {};
-  fields.forEach((f) => {
-    const input = document.createElement('input');
-    input.placeholder = f;
-    input.oninput = () => {
-      values[f] = input.value;
+  if (resource === 'users') {
+    createUserForm(root);
+  } else {
+    const form = document.createElement('div');
+    form.className = 'crudForm';
+    const values = {};
+    fields.forEach((f) => {
+      const input = document.createElement('input');
+      input.placeholder = f;
+      input.oninput = () => {
+        values[f] = input.value;
+      };
+      form.appendChild(input);
+    });
+    const createBtn = document.createElement('button');
+    createBtn.textContent = 'Create';
+    createBtn.onclick = async () => {
+      await api(`/api/admin/${resource}`, { method: 'POST', body: JSON.stringify(values) });
+      await loadCrud(resource, fields);
     };
-    form.appendChild(input);
-  });
-  const createBtn = document.createElement('button');
-  createBtn.textContent = 'Create';
-  createBtn.onclick = async () => {
-    await api(`/api/admin/${resource}`, { method: 'POST', body: JSON.stringify(values) });
-    await loadCrud(resource, fields);
-  };
-  form.appendChild(createBtn);
-  root.appendChild(form);
+    form.appendChild(createBtn);
+    root.appendChild(form);
+  }
 
   rows.forEach((row) => {
     const item = document.createElement('div');
@@ -301,7 +387,7 @@ document.querySelectorAll('.moduleBtn').forEach((btn) => {
   };
 });
 
-document.getElementById('loadUsers').onclick = () => loadCrud('users', ['email', 'name', 'role', 'password']);
+document.getElementById('loadUsers').onclick = () => loadCrud('users', []);
 document.getElementById('loadPrompts').onclick = () => loadCrud('prompts', ['module', 'language', 'version', 'content', 'is_active']);
 document.getElementById('loadKnowledge').onclick = () => loadCrud('knowledge', ['title', 'body', 'tags', 'language']);
 document.getElementById('loadTemplates').onclick = () => loadCrud('templates', ['module', 'language', 'template_type', 'title', 'body', 'is_active']);
