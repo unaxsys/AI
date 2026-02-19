@@ -375,6 +375,30 @@ document.getElementById('generatePasswordBtn').onclick = () => {
   document.getElementById('adminGeneratedPassword').value = randomPassword();
 };
 
+document.getElementById('copyPasswordBtn').onclick = async () => {
+  const password = document.getElementById('adminGeneratedPassword').value || '';
+  if (!password) {
+    document.getElementById('adminUserStatus').textContent = 'Няма парола за копиране.';
+    document.getElementById('adminUserStatus').className = 'status-message';
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(password);
+    document.getElementById('adminUserStatus').textContent = 'Паролата е копирана.';
+    document.getElementById('adminUserStatus').className = 'status-message success';
+  } catch {
+    const temp = document.createElement('textarea');
+    temp.value = password;
+    document.body.appendChild(temp);
+    temp.select();
+    document.execCommand('copy');
+    document.body.removeChild(temp);
+    document.getElementById('adminUserStatus').textContent = 'Паролата е копирана.';
+    document.getElementById('adminUserStatus').className = 'status-message success';
+  }
+};
+
 document.getElementById('adminCreateUserForm').onsubmit = async (e) => {
   e.preventDefault();
   const form = e.target;

@@ -168,21 +168,21 @@ app.get('/api/auth/me', auth, async (req, res) => {
 });
 
 app.get('/api/profile', auth, async (req, res) => {
-  res.json({
-    ok: true,
-    profile: {
-      displayName: req.user.display_name,
-      firstName: req.user.first_name || '',
-      lastName: req.user.last_name || '',
-      phone: req.user.phone || '',
-      jobTitle: req.user.job_title || '',
-      company: req.user.company || '',
-      bio: req.user.bio || '',
-      language: req.user.language_preference || 'bg',
-      theme: req.user.theme_preference || 'dark',
-      avatarUrl: req.user.avatar_bytes ? `data:${req.user.avatar_mime_type || 'image/png'};base64,${req.user.avatar_bytes.toString('base64')}` : ''
-    }
-  });
+  const profile = {
+    displayName: req.user.display_name,
+    firstName: req.user.first_name || '',
+    lastName: req.user.last_name || '',
+    phone: req.user.phone || '',
+    jobTitle: req.user.job_title || '',
+    company: req.user.company || '',
+    bio: req.user.bio || '',
+    language: req.user.language_preference || 'bg',
+    theme: req.user.theme_preference || 'dark',
+    avatarUrl: req.user.avatar_bytes ? `data:${req.user.avatar_mime_type || 'image/png'};base64,${req.user.avatar_bytes.toString('base64')}` : ''
+  };
+
+  // Alias for UI that calls /api/profile
+  return res.json({ ok: true, user: req.user, profile });
 });
 
 app.all('/api/profile', auth, async (req, res, next) => {

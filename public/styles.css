@@ -69,11 +69,12 @@ aside button.active { background: var(--accent); }
 }
 
 
-.admin-user-form { grid-template-columns: repeat(3, minmax(180px, 260px)); align-items:end; }
+.admin-user-form { grid-template-columns: repeat(3, minmax(180px, 250px)); align-items:end; column-gap:8px; row-gap:10px; }
 .admin-user-form .field-short { max-width:260px; }
-.admin-user-form .password-inline { min-width:320px; }
-.inline-field-actions { display:flex; gap:8px; align-items:center; }
-.inline-field-actions input { min-width:220px; }
+.admin-user-form .password-inline { min-width:250px; max-width:250px; }
+.inline-field-actions { display:flex; gap:6px; align-items:center; }
+.inline-field-actions input { width:100%; min-width:0; }
+.inline-field-actions button { white-space:nowrap; padding:8px 10px; }
 .admin-user-form > button[type="submit"] { align-self:end; }
 .admin-users-table-wrap { margin-top:10px; overflow:auto; }
 .admin-table th:last-child, .admin-table td:last-child { min-width:240px; }
