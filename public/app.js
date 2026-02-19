@@ -1,121 +1,114 @@
-const form = document.getElementById('proposalForm');
-const resultBox = document.getElementById('result');
-const sectionsBox = document.getElementById('sections');
-const errorBox = document.getElementById('errorBox');
-const loadingText = document.getElementById('loadingText');
-const generateBtn = document.getElementById('generateBtn');
+let token = sessionStorage.getItem('jwt') || '';
+let currentTab = 'email';
+let currentTaskId = null;
 
-const labels = [
-  { key: 'analysis', title: '1. Анализ на запитването' },
-  { key: 'service', title: '2. Предложена услуга' },
-  { key: 'pricing', title: '3. Ценово предложение' },
-  { key: 'proposalDraft', title: '4. Текст за оферта (draft)' },
-  { key: 'emailDraft', title: '5. Текст за имейл към клиента' },
-  { key: 'upsell', title: '6. Upsell / Next steps' }
-];
+const loginView = document.getElementById('loginView');
+const appView = document.getElementById('appView');
 
-function showError(message) {
-  errorBox.textContent = message;
-  errorBox.classList.remove('hidden');
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}), 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { ...options, headers });
+  if (!res.ok) throw new Error((await res.json()).error || 'Request failed');
+  return res.json();
 }
 
-function clearError() {
-  errorBox.textContent = '';
-  errorBox.classList.add('hidden');
+async function loadMe() {
+  if (!token) return;
+  try {
+    const me = await api('/api/auth/me');
+    loginView.classList.add('hidden');
+    appView.classList.remove('hidden');
+    document.getElementById('userBadge').textContent = `${me.displayName} (${me.role})`;
+    document.getElementById('adminPanel').classList.toggle('hidden', me.role !== 'admin');
+    loadHistory();
+  } catch {
+    sessionStorage.removeItem('jwt');
+    token = '';
+  }
 }
 
-function copyText(text) {
-  navigator.clipboard.writeText(text).catch(() => {
-    showError('Неуспешно копиране. Моля, копирайте текста ръчно.');
+document.getElementById('loginBtn').onclick = async () => {
+  try {
+    const data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: email.value, password: password.value }) });
+    token = data.token;
+    sessionStorage.setItem('jwt', token);
+    loadMe();
+  } catch (e) { document.getElementById('loginError').textContent = e.message; }
+};
+
+document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = () => {
+  currentTab = b.dataset.tab;
+  document.getElementById('tabTitle').textContent = b.textContent;
+  currentTaskId = null;
+  document.getElementById('sections').innerHTML = '';
+  loadHistory();
+});
+
+document.getElementById('createTask').onclick = async () => {
+  const agents = await api('/api/agents');
+  const agent = agents.find((a) => a.code === currentTab);
+  if (!agent) return alert('Agent disabled/not found');
+  const t = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ agentId: agent.id, inputText: taskInput.value }) });
+  currentTaskId = t.id;
+  loadHistory();
+};
+
+document.getElementById('generateDraft').onclick = async () => {
+  if (!currentTaskId) return alert('Create/open task first');
+  const data = await api(`/api/tasks/${currentTaskId}/generate`, { method: 'POST' });
+  renderSections(data.sections);
+};
+
+document.getElementById('saveFinal').onclick = async () => {
+  if (!currentTaskId) return;
+  const sections = [...document.querySelectorAll('#sections textarea')].map((t) => ({ sectionType: t.dataset.section, contentFinal: t.value }));
+  await api(`/api/tasks/${currentTaskId}/sections`, { method: 'PATCH', body: JSON.stringify({ sections }) });
+  alert('Saved');
+};
+
+document.getElementById('approveTask').onclick = async () => {
+  if (!currentTaskId) return;
+  await api(`/api/tasks/${currentTaskId}/approve`, { method: 'POST' });
+  alert('Approved');
+  loadHistory();
+};
+
+document.getElementById('refreshHistory').onclick = loadHistory;
+
+async function loadHistory() {
+  const agents = await api('/api/agents');
+  const agent = agents.find((a) => a.code === currentTab);
+  if (!agent) return;
+  const q = encodeURIComponent(document.getElementById('search').value || '');
+  const rows = await api(`/api/tasks?agentId=${agent.id}&q=${q}`);
+  const list = document.getElementById('history');
+  list.innerHTML = '';
+  rows.forEach((r) => {
+    const li = document.createElement('li');
+    li.textContent = `#${r.id} [${r.status}] ${r.input_text.slice(0, 80)}`;
+    li.onclick = async () => {
+      currentTaskId = r.id;
+      const data = await api(`/api/tasks/${r.id}`);
+      taskInput.value = data.task.input_text;
+      renderSections(data.sections.map((s) => ({ section_type: s.section_type, content_draft: s.content_final || s.content_draft || '' })));
+    };
+    list.appendChild(li);
   });
 }
 
-function renderSection(title, content) {
-  const wrapper = document.createElement('article');
-  wrapper.className = 'result-section';
-
-  const header = document.createElement('div');
-  header.className = 'section-header';
-
-  const heading = document.createElement('h3');
-  heading.textContent = title;
-
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'copy-btn';
-  button.textContent = 'Копирай';
-  button.addEventListener('click', () => copyText(content));
-
-  const textArea = document.createElement('textarea');
-  textArea.readOnly = true;
-  textArea.value = content;
-
-  header.appendChild(heading);
-  header.appendChild(button);
-  wrapper.appendChild(header);
-  wrapper.appendChild(textArea);
-
-  return wrapper;
+function renderSections(sections) {
+  const el = document.getElementById('sections');
+  el.innerHTML = '';
+  sections.forEach((s) => {
+    const label = document.createElement('label');
+    label.textContent = s.section_type;
+    const ta = document.createElement('textarea');
+    ta.dataset.section = s.section_type;
+    ta.value = s.content_final || s.content_draft || '';
+    el.appendChild(label);
+    el.appendChild(ta);
+  });
 }
 
-function setLoading(isLoading) {
-  loadingText.classList.toggle('hidden', !isLoading);
-  generateBtn.disabled = isLoading;
-  generateBtn.textContent = isLoading ? 'Генериране...' : 'Генерирай предложение';
-}
-
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  clearError();
-  sectionsBox.innerHTML = '';
-  resultBox.classList.add('hidden');
-
-  const payload = {
-    leadText: form.leadText.value.trim(),
-    company_name: form.company_name.value.trim(),
-    industry: form.industry.value.trim(),
-    approximate_budget: form.approximate_budget.value.trim(),
-    expected_timeline: form.expected_timeline.value.trim()
-  };
-
-  if (!payload.leadText) {
-    showError('Полето „Опишете вашето запитване“ е задължително.');
-    return;
-  }
-
-  if (payload.leadText.length > 4000) {
-    showError('Запитването е твърде дълго. Максимум 4000 символа.');
-    return;
-  }
-
-  setLoading(true);
-
-  try {
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-site-api-key': window.SITE_API_KEY || ''
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Възникна грешка при обработката на заявката.');
-    }
-
-    labels.forEach(({ key, title }) => {
-      const sectionContent = data[key] || '';
-      sectionsBox.appendChild(renderSection(title, sectionContent));
-    });
-
-    resultBox.classList.remove('hidden');
-    resultBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (error) {
-    showError(error.message || 'Възникна неочаквана грешка.');
-  } finally {
-    setLoading(false);
-  }
-});
+loadMe();
