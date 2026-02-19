@@ -15,7 +15,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const execFileAsync = promisify(execFile);
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8789);
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
 const DEFAULT_ADMIN_EMAIL = 'ogi.stoev80@gmail.com';
 const DEFAULT_ADMIN_PASSWORD = '12345678';
