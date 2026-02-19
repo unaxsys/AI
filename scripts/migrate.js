@@ -64,7 +64,13 @@ async function migrate() {
   }
 }
 
-migrate().catch((err) => {
-  console.error('Migration failed:', err.message);
-  process.exit(1);
-});
+module.exports = {
+  migrate
+};
+
+if (require.main === module) {
+  migrate().catch((err) => {
+    console.error('Migration failed:', err.message);
+    process.exit(1);
+  });
+}
