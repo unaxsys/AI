@@ -1,31 +1,82 @@
-:root { --bg:#090f1d; --panel:#121a2e; --accent:#2f86ff; --text:#e8eefc; }
+:root {
+  --bg:#090f1d;
+  --panel:#121a2e;
+  --accent:#2f86ff;
+  --text:#e8eefc;
+  --input:#0f1628;
+  --border:#253353;
+}
 * { box-sizing:border-box; font-family: Inter, Arial, sans-serif; }
 body { margin:0; background:var(--bg); color:var(--text); }
+body.theme-light {
+  --bg:#f0f3fa;
+  --panel:#ffffff;
+  --accent:#2f6dff;
+  --text:#0e1a33;
+  --input:#f8faff;
+  --border:#cfdaee;
+}
 .hidden { display:none!important; }
-.center-card { width:360px; margin:8vh auto; background:var(--panel); border:1px solid #253353; border-radius:14px; padding:24px; display:flex; flex-direction:column; gap:10px; }
+.center-card { width:360px; margin:8vh auto; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:24px; display:flex; flex-direction:column; gap:10px; }
 .logo { width:38px; height:38px; }
 .login-brand { display:flex; align-items:center; gap:10px; }
 .login-brand h1 { margin:0; }
-input, textarea { background:#0f1628; color:var(--text); border:1px solid #2b3f68; border-radius:8px; padding:10px; }
+input, textarea, select { background:var(--input); color:var(--text); border:1px solid color-mix(in oklab, var(--border), #ffffff 10%); border-radius:8px; padding:10px; }
 button { background:var(--accent); color:white; border:none; border-radius:8px; padding:10px 12px; cursor:pointer; }
+button:disabled { opacity:0.5; cursor:not-allowed; }
 .layout { display:grid; grid-template-columns: 220px 1fr; grid-template-rows:60px 1fr; min-height:100vh; }
-header { grid-column:1/3; display:flex; justify-content:space-between; align-items:center; padding:0 16px; border-bottom:1px solid #253353; background:#0b1324; }
+header { grid-column:1/3; display:flex; justify-content:space-between; align-items:center; padding:0 16px; border-bottom:1px solid var(--border); background:color-mix(in oklab, var(--bg), #000 10%); }
 .brand { display:flex; gap:10px; align-items:center; font-weight:700; }
-aside { border-right:1px solid #253353; padding:12px; display:flex; flex-direction:column; gap:8px; }
-aside button { text-align:left; background:#17233f; }
+aside { border-right:1px solid var(--border); padding:12px; display:flex; flex-direction:column; gap:8px; }
+aside button { text-align:left; background:color-mix(in oklab, var(--panel), #0a1530 45%); }
 main { padding:16px; }
 textarea#taskInput { width:100%; min-height:120px; }
 .actions,.toolbar { display:flex; gap:8px; margin:10px 0; align-items:center; }
 #sections textarea { width:100%; min-height:90px; margin-bottom:8px; }
 .error { color:#ff8f8f; min-height:20px; }
-.panel { background:var(--panel); border:1px solid #253353; border-radius:10px; padding:12px; margin-bottom:12px; }
+.panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:12px; }
 
 aside button.active { background: var(--accent); }
 .admin-form { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:10px; margin:14px 0; }
 .admin-form label { display:flex; flex-direction:column; gap:6px; font-size:14px; }
-.admin-form button { grid-column: 1 / -1; width:max-content; }
+.admin-form button { width:max-content; }
 .status-message { min-height:24px; margin:6px 0 12px; }
-.status-message.success { color:#8fffb2; }
-.admin-table { width:100%; border-collapse:collapse; background:#0f1628; border:1px solid #253353; border-radius:8px; overflow:hidden; }
-.admin-table th, .admin-table td { border-bottom:1px solid #253353; padding:10px; text-align:left; }
-.admin-table td:last-child { display:flex; gap:8px; flex-wrap:wrap; }
+.status-message.success { color:#2fbf66; }
+
+.user-menu-wrap { position:relative; }
+.user-menu-btn { background:transparent; border:1px solid var(--border); color:var(--text); }
+.user-menu { position:absolute; right:0; top:44px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px; min-width:200px; z-index:9; }
+.user-menu button { width:100%; text-align:left; margin-bottom:6px; }
+.user-menu button:last-child { margin-bottom:0; }
+
+.admin-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.admin-tabs button { background:color-mix(in oklab, var(--panel), #0a1530 45%); }
+.admin-tabs button.active { background:var(--accent); }
+
+
+.password-grid { display:grid; gap:10px; max-width:480px; }
+.password-field-wrap { position:relative; }
+.password-field-wrap input { width:100%; padding-right:44px; }
+.password-eye {
+  position:absolute;
+  right:6px;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  border-radius:8px;
+  padding:0;
+}
+
+.theme-toggle {
+  position:fixed;
+  left:14px;
+  bottom:14px;
+  width:46px;
+  height:46px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:var(--panel);
+  color:var(--text);
+  z-index:99;
+}
