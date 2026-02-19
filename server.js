@@ -1,390 +1,490 @@
 require('dotenv').config();
-const express = require('express');
 const path = require('path');
-const fs = require('fs');
+const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg');
-const OpenAI = require('openai');
-const multer = require('multer');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
+
+const { run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
+const { signToken, requireAuth, requireRole } = require('./auth');
+const { generateStructuredOutput } = require('./openai');
+const { publicGenerateLimiter, loginLimiter } = require('./rateLimit');
+const { verifyTurnstile } = require('./turnstile');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-const execFileAsync = promisify(execFile);
-
 const PORT = Number(process.env.PORT || 8789);
-const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
-const DEFAULT_ADMIN_EMAIL = 'ogi.stoev80@gmail.com';
-const DEFAULT_ADMIN_PASSWORD = '12345678';
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const STORE_PUBLIC_REQUESTS = String(process.env.STORE_PUBLIC_REQUESTS || 'false').toLowerCase() === 'true';
+const PUBLIC_ALLOWED_ORIGINS = new Set(['https://anagami.bg', 'https://www.anagami.bg']);
 
-app.use(express.json({ limit: '1mb' }));
-app.use('/public', express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '64kb' }));
+app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
-
-function signToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role, email: user.email, name: user.display_name }, JWT_SECRET, { expiresIn: '8h' });
+function clampText(value, max = 4000) {
+  return String(value || '').trim().slice(0, max);
 }
 
-async function auth(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true', [payload.sub]);
-    if (!rows[0]) return res.status(401).json({ error: 'Unauthorized' });
-    req.user = rows[0];
-    next();
-  } catch {
-    res.status(401).json({ error: 'Unauthorized' });
-  }
-}
-
-function requirePasswordUpdated(req, res, next) {
-  if (req.user.must_change_password) {
-    return res.status(403).json({ error: 'Password change required', code: 'PASSWORD_CHANGE_REQUIRED' });
-  }
-  next();
-}
-
-function adminOnly(req, res, next) {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  next();
-}
-
-async function seedAdmin() {
-  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
-  const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [DEFAULT_ADMIN_EMAIL]);
-  if (!rows[0]) {
-    await pool.query(
-      'INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password) VALUES ($1,$2,$3,$4,true,true)',
-      [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
-    );
-    return;
-  }
-
-  await pool.query(
-    'UPDATE users SET password_hash=$1, role=$2, is_active=true, must_change_password=true, updated_at=now() WHERE email=$3',
-    [hash, 'admin', DEFAULT_ADMIN_EMAIL]
-  );
-}
-
-async function runMigrations() {
-  const sql = fs.readFileSync(path.join(__dirname, 'migrations', '001_init.sql'), 'utf8');
-  await pool.query(sql);
-}
-
-async function getActivePrompt(agentId) {
-  const { rows } = await pool.query('SELECT system_prompt_text FROM agent_prompt_versions WHERE agent_id=$1 AND is_active=true ORDER BY version_no DESC LIMIT 1', [agentId]);
-  return rows[0]?.system_prompt_text || 'You are a practical business assistant. Return concise Bulgarian text with section labels.';
-}
-
-async function buildKnowledge(agentId) {
-  const { rows } = await pool.query('SELECT title, content_text FROM knowledge_documents WHERE agent_id=$1 ORDER BY id DESC LIMIT 5', [agentId]);
-  return rows.map((r) => `# ${r.title}\n${r.content_text}`).join('\n\n');
-}
-
-function sectionsForAgent(code) {
-  const map = {
-    email: ['reply_short', 'reply_standard', 'reply_detailed'],
-    support: ['support_classification', 'support_reply'],
-    marketing: ['analysis', 'marketing_copy', 'upsell'],
-    recruiting: ['analysis', 'recruiting_jd', 'recruiting_reply'],
-    offers: ['analysis', 'service', 'pricing', 'proposal_draft', 'email_draft', 'upsell'],
-    contracts: ['contract_summary', 'terms']
+function requireBodyField(field, max = 4000) {
+  return (req, res, next) => {
+    const value = clampText(req.body[field], max);
+    if (!value) return res.status(400).json({ error: `${field} is required` });
+    req.body[field] = value;
+    return next();
   };
-  return map[code] || ['analysis'];
 }
 
-function parseLabeledSections(text, sectionTypes) {
-  const out = {};
-  sectionTypes.forEach((s) => { out[s] = ''; });
-  let current = sectionTypes[0];
-  text.split('\n').forEach((line) => {
-    const match = sectionTypes.find((s) => line.toLowerCase().startsWith(`${s}:`));
-    if (match) {
-      current = match;
-      out[current] += line.slice(match.length + 1).trim() + '\n';
-    } else {
-      out[current] += line + '\n';
-    }
-  });
-  return out;
+function normalizeLanguage(lang) {
+  const value = String(lang || 'bg').toLowerCase();
+  if (value === 'en') return 'en';
+  return 'bg';
 }
 
-app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
+function assertModule(moduleCode) {
+  return DEFAULT_MODULES.includes(moduleCode);
+}
 
-app.post('/api/auth/login', loginLimiter, async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase();
-  const password = String(req.body.password || '');
-  if (!email || !password) return res.status(400).json({ error: 'Missing credentials' });
-  const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
-  const user = rows[0];
-  if (!user || !user.is_active) return res.status(401).json({ error: 'Invalid credentials' });
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-  await pool.query('UPDATE users SET last_login_at=now() WHERE id=$1', [user.id]);
-  res.json({
-    token: signToken(user),
-    user: {
-      id: user.id,
-      role: user.role,
-      email: user.email,
-      displayName: user.display_name,
-      mustChangePassword: user.must_change_password
-    }
-  });
-});
+async function logUsage(endpoint, req, userId = null, tokensIn = 0, tokensOut = 0) {
+  await run('INSERT INTO usage_logs(endpoint, ip, user_id, tokens_in, tokens_out) VALUES(?,?,?,?,?)', [
+    endpoint,
+    req.ip,
+    userId,
+    tokensIn,
+    tokensOut
+  ]);
+}
 
-app.get('/api/auth/me', auth, async (req, res) => {
-  res.json({
-    id: req.user.id,
-    role: req.user.role,
-    email: req.user.email,
-    displayName: req.user.display_name,
-    mustChangePassword: req.user.must_change_password
-  });
-});
-
-app.post('/api/profile/change-password', auth, async (req, res) => {
-  const newPassword = String(req.body.newPassword || '');
-  if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 chars' });
-  const hash = await bcrypt.hash(newPassword, 10);
-  await pool.query('UPDATE users SET password_hash=$1, must_change_password=false, updated_at=now() WHERE id=$2', [hash, req.user.id]);
-  res.json({ ok: true });
-});
-
-app.get('/api/agents', auth, requirePasswordUpdated, async (_req, res) => {
-  const { rows } = await pool.query('SELECT * FROM agents WHERE is_enabled=true ORDER BY id');
-  res.json(rows);
-});
-
-app.post('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
-  const { agentId, inputText } = req.body;
-  const text = String(inputText || '').trim();
-  if (!text || text.length > 8000) return res.status(400).json({ error: 'Invalid input' });
-  const r = await pool.query('INSERT INTO tasks(agent_id, created_by, input_text, status) VALUES ($1,$2,$3,$4) RETURNING *', [agentId, req.user.id, text, 'draft']);
-  res.status(201).json(r.rows[0]);
-});
-
-app.get('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const agentId = req.query.agentId;
-  const params = [req.user.id];
-  let sql = 'SELECT t.*, a.code agent_code FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.created_by=$1';
-  if (agentId) { params.push(agentId); sql += ` AND t.agent_id=$${params.length}`; }
-  if (q) { params.push(`%${q}%`); sql += ` AND t.input_text ILIKE $${params.length}`; }
-  sql += ' ORDER BY t.updated_at DESC LIMIT 100';
-  const { rows } = await pool.query(sql, params);
-  res.json(rows);
-});
-
-app.get('/api/tasks/:id', auth, requirePasswordUpdated, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM tasks WHERE id=$1 AND created_by=$2', [req.params.id, req.user.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
-  const sections = await pool.query('SELECT * FROM task_sections WHERE task_id=$1 ORDER BY id', [req.params.id]);
-  res.json({ task: rows[0], sections: sections.rows });
-});
-
-app.post('/api/tasks/:id/generate', auth, requirePasswordUpdated, async (req, res) => {
-  const taskId = req.params.id;
-  const t = await pool.query('SELECT t.*, a.code FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=$1 AND t.created_by=$2', [taskId, req.user.id]);
-  const task = t.rows[0];
-  if (!task) return res.status(404).json({ error: 'Not found' });
-
-  const prompt = await getActivePrompt(task.agent_id);
-  const knowledge = await buildKnowledge(task.agent_id);
-  const sectionTypes = sectionsForAgent(task.code);
-  const instructions = `Return plain text. Use lines starting with exact labels: ${sectionTypes.map((s) => `${s}:`).join(', ')}.`;
-
-  const result = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-    temperature: 0.3,
-    messages: [
-      { role: 'system', content: `${prompt}\n\nKnowledge:\n${knowledge || 'No knowledge configured.'}` },
-      { role: 'user', content: `${instructions}\n\nInput:\n${task.input_text}` }
-    ]
-  });
-
-  const text = result.choices?.[0]?.message?.content || '';
-  const parsed = parseLabeledSections(text, sectionTypes);
-  for (const s of sectionTypes) {
-    await pool.query(
-      `INSERT INTO task_sections(task_id, section_type, content_draft, updated_at)
-       VALUES ($1,$2,$3,now())
-       ON CONFLICT(task_id, section_type) DO UPDATE SET content_draft=EXCLUDED.content_draft, updated_at=now()`,
-      [taskId, s, parsed[s]?.trim() || '']
-    );
-  }
-  await pool.query('UPDATE tasks SET updated_at=now(), status=$2 WHERE id=$1', [taskId, 'reviewed']);
-  const sections = await pool.query('SELECT * FROM task_sections WHERE task_id=$1 ORDER BY id', [taskId]);
-  res.json({ sections: sections.rows });
-});
-
-app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, res) => {
-  const updates = Array.isArray(req.body.sections) ? req.body.sections : [];
-  for (const row of updates) {
-    await pool.query('UPDATE task_sections SET content_final=$1, updated_at=now() WHERE task_id=$2 AND section_type=$3', [String(row.contentFinal || ''), req.params.id, row.sectionType]);
-  }
-  await pool.query('UPDATE tasks SET updated_at=now() WHERE id=$1', [req.params.id]);
-  res.json({ ok: true });
-});
-
-app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res) => {
-  await pool.query('UPDATE tasks SET status=$2, approved_by=$3, approved_at=now(), updated_at=now() WHERE id=$1 AND created_by=$3', [req.params.id, 'approved', req.user.id]);
-  res.json({ ok: true });
-});
-
-app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
-  const { clientCompany, clientName, clientEmail, leadText, currency = 'BGN', vatMode = 'standard' } = req.body;
-  const activePricing = await pool.query('SELECT * FROM pricing_versions WHERE is_active=true ORDER BY id DESC LIMIT 1');
-  const offer = await pool.query(
-    'INSERT INTO offers(created_by,client_company,client_name,client_email,lead_text,currency,vat_mode,status,pricing_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-    [req.user.id, clientCompany, clientName, clientEmail, leadText, currency, vatMode, 'draft', activePricing.rows[0]?.id || null]
+async function resolvePrompt(moduleCode, language) {
+  const active = await get(
+    'SELECT content FROM prompts WHERE module=? AND language=? AND is_active=true ORDER BY version DESC LIMIT 1',
+    [moduleCode, language]
   );
-  const pricingText = activePricing.rows[0] ? 'Ценообразуването ще се изчисли автоматично.' : 'TBD / requires admin pricing setup';
-  await pool.query('INSERT INTO offer_sections(offer_id, section_type, content) VALUES ($1,$2,$3),($1,$4,$5)', [offer.rows[0].id, 'offer_intro', 'Проектна оферта.', 'pricing', pricingText]);
-  res.status(201).json({ offer: offer.rows[0], pricingConfigured: Boolean(activePricing.rows[0]) });
+  if (active) return active.content;
+  return defaultSalesPrompt(language);
+}
+
+async function resolveKnowledge(language, moduleCode, leadText) {
+  const tokens = `${moduleCode} ${leadText}`.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 10);
+  const filters = tokens.map(() => 'LOWER(tags) LIKE ?').join(' OR ');
+  const params = [language, ...tokens.map((t) => `%${t}%`)];
+  const query = filters
+    ? `SELECT title, body, tags FROM knowledge_snippets WHERE language=? AND (${filters}) ORDER BY id DESC LIMIT 5`
+    : 'SELECT title, body, tags FROM knowledge_snippets WHERE language=? ORDER BY id DESC LIMIT 5';
+  const rows = await all(query, params);
+  return rows.map((r) => `[${r.tags}] ${r.title}\n${r.body}`);
+}
+
+async function resolveTemplates(moduleCode, language) {
+  const rows = await all(
+    'SELECT title, body, template_type FROM templates WHERE module=? AND language=? AND is_active=true ORDER BY id DESC LIMIT 3',
+    [moduleCode, language]
+  );
+  return rows.map((r) => `${r.template_type} :: ${r.title}\n${r.body}`);
+}
+
+async function resolvePricing(moduleCode) {
+  const rows = await all('SELECT service, min_price, max_price, currency, notes FROM pricing_rules WHERE module=? ORDER BY id DESC LIMIT 8', [
+    moduleCode
+  ]);
+  return rows.map((r) => `${r.service}: ${r.min_price || 0}-${r.max_price || 0} ${r.currency}. ${r.notes || ''}`.trim());
+}
+
+app.get('/api/health', async (_req, res) => {
+  let dbReady = true;
+  try {
+    await get('SELECT 1 as x');
+  } catch (_e) {
+    dbReady = false;
+  }
+  res.json({ ok: true, dbReady, hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY) });
 });
 
-app.post('/api/contracts', auth, requirePasswordUpdated, async (req, res) => {
-  const { contractType, clientCompany, clientName, clientEmail } = req.body;
-  const r = await pool.query('INSERT INTO contracts(created_by,contract_type,client_company,client_name,client_email,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.user.id, contractType || 'general', clientCompany, clientName, clientEmail, 'draft']);
-  await pool.query('INSERT INTO contract_sections(contract_id, section_type, content) VALUES ($1,$2,$3)', [r.rows[0].id, 'contract_summary', 'Contract scaffold ready.']);
-  res.status(201).json(r.rows[0]);
+app.post('/api/auth/login', loginLimiter, requireBodyField('email', 255), requireBodyField('password', 255), async (req, res) => {
+  const email = String(req.body.email).toLowerCase();
+  const user = await get('SELECT * FROM users WHERE email=?', [email]);
+  if (!user || user.is_active !== true) return res.status(401).json({ error: 'Invalid credentials' });
+
+  const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+
+  await run('UPDATE users SET last_login_at=NOW() WHERE id=?', [user.id]);
+  await logUsage('/api/auth/login', req, user.id);
+  return res.json({
+    token: signToken(user),
+    user: { id: user.id, email: user.email, name: user.name, role: user.role }
+  });
 });
 
-app.get('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
-  const { rows } = await pool.query('SELECT id,email,display_name,role,is_active,created_at,last_login_at,must_change_password FROM users ORDER BY created_at DESC');
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  await logUsage('/api/auth/me', req, req.user.id);
+  res.json(req.user);
+});
+
+app.get('/api/modules', requireAuth, (_req, res) => {
+  res.json(DEFAULT_MODULES);
+});
+
+app.post('/api/tasks', requireAuth, requireRole('agent'), requireBodyField('leadText'), async (req, res) => {
+  const moduleCode = clampText(req.body.module, 50).toLowerCase();
+  if (!assertModule(moduleCode)) return res.status(400).json({ error: 'Invalid module' });
+
+  const language = normalizeLanguage(req.body.language);
+  const data = {
+    moduleCode,
+    language,
+    leadText: clampText(req.body.leadText),
+    company: clampText(req.body.company, 255),
+    industry: clampText(req.body.industry, 255),
+    budget: clampText(req.body.budget, 255),
+    timeline: clampText(req.body.timeline, 255)
+  };
+
+  const result = await run(
+    `INSERT INTO tasks(module, language, lead_text, company, industry, budget, timeline, created_by)
+     VALUES(?,?,?,?,?,?,?,?)`,
+    [data.moduleCode, data.language, data.leadText, data.company, data.industry, data.budget, data.timeline, req.user.id]
+  );
+  await logUsage('/api/tasks', req, req.user.id);
+  res.json({ id: result.lastID });
+});
+
+app.post('/api/tasks/:id/generate', requireAuth, requireRole('agent'), async (req, res) => {
+  const taskId = Number(req.params.id);
+  const task = await get('SELECT * FROM tasks WHERE id=?', [taskId]);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const prompt = await resolvePrompt(task.module, task.language);
+  const snippets = await resolveKnowledge(task.language, task.module, task.lead_text);
+  const templates = await resolveTemplates(task.module, task.language);
+  const pricing = await resolvePricing(task.module);
+
+  try {
+    const generated = await generateStructuredOutput({
+      module: task.module,
+      language: task.language,
+      payload: {
+        leadText: task.lead_text,
+        company: task.company,
+        industry: task.industry,
+        budget: task.budget,
+        timeline: task.timeline
+      },
+      prompt,
+      snippets,
+      templates,
+      pricing
+    });
+
+    await run(
+      `INSERT INTO task_outputs(task_id, language, analysis, service, pricing, proposalDraft, emailDraft, upsell, raw_output, input_tokens, output_tokens)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(task_id) DO UPDATE SET
+        language=excluded.language,
+        analysis=excluded.analysis,
+        service=excluded.service,
+        pricing=excluded.pricing,
+        proposalDraft=excluded.proposalDraft,
+        emailDraft=excluded.emailDraft,
+        upsell=excluded.upsell,
+        raw_output=excluded.raw_output,
+        input_tokens=excluded.input_tokens,
+        output_tokens=excluded.output_tokens,
+        updated_at=NOW()`,
+      [
+        taskId,
+        task.language,
+        generated.output.analysis,
+        generated.output.service,
+        generated.output.pricing,
+        generated.output.proposalDraft,
+        generated.output.emailDraft,
+        generated.output.upsell,
+        generated.rawOutput,
+        generated.usage.inputTokens,
+        generated.usage.outputTokens
+      ]
+    );
+
+    await run('UPDATE tasks SET updated_at=NOW() WHERE id=?', [taskId]);
+    await logUsage('/api/tasks/:id/generate', req, req.user.id, generated.usage.inputTokens, generated.usage.outputTokens);
+    return res.json(generated.output);
+  } catch (err) {
+    await run(
+      `INSERT INTO task_outputs(task_id, language, analysis, service, pricing, proposalDraft, emailDraft, upsell, raw_output, input_tokens, output_tokens)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(task_id) DO UPDATE SET raw_output=excluded.raw_output, updated_at=NOW()`,
+      [taskId, task.language, '', '', '', '', '', '', String(err.message || err), 0, 0]
+    );
+    return res.status(500).json({ error: 'Generation failed', details: String(err.message || err) });
+  }
+});
+
+app.get('/api/tasks', requireAuth, async (req, res) => {
+  const moduleCode = clampText(req.query.module, 50).toLowerCase();
+  const q = clampText(req.query.q, 255).toLowerCase();
+  const params = [];
+  let query = `
+    SELECT t.id, t.module, t.language, t.status, t.lead_text, t.created_at, u.name as creator_name
+    FROM tasks t
+    LEFT JOIN users u ON u.id=t.created_by
+    WHERE 1=1
+  `;
+  if (moduleCode) {
+    query += ' AND t.module=?';
+    params.push(moduleCode);
+  }
+  if (q) {
+    query += ' AND LOWER(t.lead_text) LIKE ?';
+    params.push(`%${q}%`);
+  }
+  query += ' ORDER BY t.id DESC LIMIT 200';
+  const rows = await all(query, params);
+  await logUsage('/api/tasks', req, req.user.id);
   res.json(rows);
 });
 
-app.post('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const hash = await bcrypt.hash(String(req.body.password || 'Change123!'), 10);
-  const { rows } = await pool.query('INSERT INTO users(email,display_name,password_hash,role,is_active,must_change_password) VALUES($1,$2,$3,$4,true,$5) RETURNING id,email,display_name,role,is_active,must_change_password', [req.body.email, req.body.displayName, hash, req.body.role || 'user', Boolean(req.body.mustChangePassword)]);
-  res.status(201).json(rows[0]);
+app.get('/api/tasks/:id', requireAuth, async (req, res) => {
+  const task = await get('SELECT * FROM tasks WHERE id=?', [Number(req.params.id)]);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const output = await get('SELECT * FROM task_outputs WHERE task_id=?', [task.id]);
+  await logUsage('/api/tasks/:id', req, req.user.id);
+  res.json({ task, output });
 });
 
-app.patch('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  await pool.query('UPDATE users SET role=COALESCE($1,role), is_active=COALESCE($2,is_active), must_change_password=COALESCE($3,must_change_password), updated_at=now() WHERE id=$4', [req.body.role, req.body.isActive, req.body.mustChangePassword, req.params.id]);
-  if (req.body.newPassword) {
-    const hash = await bcrypt.hash(String(req.body.newPassword), 10);
-    await pool.query('UPDATE users SET password_hash=$1, must_change_password=true, updated_at=now() WHERE id=$2', [hash, req.params.id]);
-  }
+app.patch('/api/tasks/:id/final', requireAuth, requireRole('agent'), async (req, res) => {
+  const taskId = Number(req.params.id);
+  const language = normalizeLanguage(req.body.language);
+  const payload = {
+    analysis: clampText(req.body.analysis),
+    service: clampText(req.body.service),
+    pricing: clampText(req.body.pricing),
+    proposalDraft: clampText(req.body.proposalDraft),
+    emailDraft: clampText(req.body.emailDraft),
+    upsell: clampText(req.body.upsell)
+  };
+
+  await run(
+    `INSERT INTO task_outputs(task_id, language, analysis, service, pricing, proposalDraft, emailDraft, upsell)
+     VALUES(?,?,?,?,?,?,?,?)
+     ON CONFLICT(task_id) DO UPDATE SET
+      language=excluded.language,
+      analysis=excluded.analysis,
+      service=excluded.service,
+      pricing=excluded.pricing,
+      proposalDraft=excluded.proposalDraft,
+      emailDraft=excluded.emailDraft,
+      upsell=excluded.upsell,
+      updated_at=NOW()`,
+    [taskId, language, payload.analysis, payload.service, payload.pricing, payload.proposalDraft, payload.emailDraft, payload.upsell]
+  );
+  await run('UPDATE tasks SET updated_at=NOW() WHERE id=?', [taskId]);
+  await logUsage('/api/tasks/:id/final', req, req.user.id);
   res.json({ ok: true });
 });
 
-app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
-  const { rows } = await pool.query('SELECT apv.*, a.code agent_code FROM agent_prompt_versions apv JOIN agents a ON a.id=apv.agent_id ORDER BY apv.created_at DESC LIMIT 200');
-  res.json(rows);
+app.post('/api/tasks/:id/approve', requireAuth, requireRole('manager'), async (req, res) => {
+  await run('UPDATE tasks SET status=\'approved\', approved_by=?, approved_at=NOW(), updated_at=NOW() WHERE id=?', [
+    req.user.id,
+    Number(req.params.id)
+  ]);
+  await logUsage('/api/tasks/:id/approve', req, req.user.id);
+  res.json({ ok: true });
 });
 
-app.post('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const v = await pool.query('SELECT COALESCE(MAX(version_no),0)+1 n FROM agent_prompt_versions WHERE agent_id=$1', [req.body.agentId]);
-  if (req.body.isActive) await pool.query('UPDATE agent_prompt_versions SET is_active=false WHERE agent_id=$1', [req.body.agentId]);
-  const { rows } = await pool.query('INSERT INTO agent_prompt_versions(agent_id,version_no,system_prompt_text,is_active) VALUES ($1,$2,$3,$4) RETURNING *', [req.body.agentId, v.rows[0].n, req.body.systemPromptText, Boolean(req.body.isActive)]);
-  res.status(201).json(rows[0]);
+app.get('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
+  const users = await all('SELECT id, email, name, role, is_active, last_login_at, created_at FROM users ORDER BY id DESC');
+  await logUsage('/api/admin/users', req, req.user.id);
+  res.json(users);
 });
 
-app.get('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM knowledge_documents WHERE agent_id=$1 ORDER BY created_at DESC', [req.query.agentId]);
-  res.json(rows);
+app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
+  const email = clampText(req.body.email, 255).toLowerCase();
+  const name = clampText(req.body.name, 255);
+  const role = clampText(req.body.role, 20);
+  const password = clampText(req.body.password, 255);
+  if (!['admin', 'manager', 'agent', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (!email || !name || !password) return res.status(400).json({ error: 'Missing fields' });
+
+  const hash = await bcrypt.hash(password, 10);
+  const created = await run('INSERT INTO users(email, name, role, password_hash, is_active) VALUES(?,?,?,?,true)', [email, name, role, hash]);
+  await logUsage('/api/admin/users', req, req.user.id);
+  res.json({ id: created.lastID });
 });
 
-app.post('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('INSERT INTO knowledge_documents(agent_id,title,content_text,source) VALUES($1,$2,$3,$4) RETURNING *', [req.body.agentId, req.body.title, req.body.contentText, req.body.source]);
-  res.status(201).json(rows[0]);
+app.patch('/api/admin/users/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
+  const isActive = Boolean(req.body.isActive);
+  await run('UPDATE users SET is_active=?, updated_at=NOW() WHERE id=?', [isActive, Number(req.params.id)]);
+  await logUsage('/api/admin/users/:id/status', req, req.user.id);
+  res.json({ ok: true });
 });
 
-app.post('/api/admin/templates', auth, requirePasswordUpdated, adminOnly, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'File required' });
-  if (req.body.isActive === 'true') await pool.query('UPDATE doc_templates SET is_active=false WHERE template_type=$1', [req.body.templateType]);
-  const { rows } = await pool.query('INSERT INTO doc_templates(name,template_type,is_active,docx_bytes,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,name,template_type,is_active,created_at', [req.body.name, req.body.templateType, req.body.isActive === 'true', req.file.buffer, req.user.id]);
-  res.status(201).json(rows[0]);
+app.post('/api/admin/users/:id/reset-password', requireAuth, requireRole('admin'), async (req, res) => {
+  const password = clampText(req.body.password, 255);
+  if (!password) return res.status(400).json({ error: 'Password required' });
+  const hash = await bcrypt.hash(password, 10);
+  await run('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hash, Number(req.params.id)]);
+  await logUsage('/api/admin/users/:id/reset-password', req, req.user.id);
+  res.json({ ok: true });
 });
 
-app.get('/api/admin/pricing', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
-  const versions = await pool.query('SELECT * FROM pricing_versions ORDER BY created_at DESC');
-  const services = await pool.query('SELECT * FROM pricing_services ORDER BY created_at DESC');
-  res.json({ versions: versions.rows, services: services.rows });
-});
+function registerCrudRoutes(basePath, minRole, tableName, fieldConfig) {
+  app.get(basePath, requireAuth, requireRole(minRole), async (req, res) => {
+    const rows = await all(`SELECT * FROM ${tableName} ORDER BY id DESC LIMIT 300`);
+    res.json(rows);
+  });
 
-app.post('/api/admin/pricing/versions', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  if (req.body.isActive) await pool.query('UPDATE pricing_versions SET is_active=false');
-  const { rows } = await pool.query('INSERT INTO pricing_versions(name,is_active) VALUES($1,$2) RETURNING *', [req.body.name, Boolean(req.body.isActive)]);
-  res.status(201).json(rows[0]);
-});
+  app.post(basePath, requireAuth, requireRole(minRole), async (req, res) => {
+    const fields = fieldConfig.map((f) => f.name);
+    const values = fieldConfig.map((f) => clampText(req.body[f.name], f.max || 4000));
+    if (fields.includes('created_by')) {
+      const idx = fields.indexOf('created_by');
+      values[idx] = req.user.id;
+    }
+    if (fields.includes('is_active')) {
+      const idx = fields.indexOf('is_active');
+      values[idx] = String(values[idx]).toLowerCase() === 'true' || values[idx] === true || values[idx] === '1';
+    }
+    const placeholders = fields.map(() => '?').join(',');
+    const result = await run(`INSERT INTO ${tableName}(${fields.join(',')}) VALUES(${placeholders})`, values);
+    res.json({ id: result.lastID });
+  });
 
-async function storeGenerated(entityType, entityId, format, mimeType, bytes, userId) {
-  const { rows } = await pool.query('INSERT INTO generated_files(entity_type,entity_id,format,mime_type,file_bytes,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id', [entityType, entityId, format, mimeType, bytes, userId]);
-  return rows[0].id;
+  app.put(`${basePath}/:id`, requireAuth, requireRole(minRole), async (req, res) => {
+    const assignments = [];
+    const params = [];
+    for (const field of fieldConfig) {
+      if (field.name === 'created_by') continue;
+      assignments.push(`${field.name}=?`);
+      params.push(clampText(req.body[field.name], field.max || 4000));
+    }
+    params.push(Number(req.params.id));
+    await run(`UPDATE ${tableName} SET ${assignments.join(',')} WHERE id=?`, params);
+    res.json({ ok: true });
+  });
+
+  app.delete(`${basePath}/:id`, requireAuth, requireRole(minRole), async (req, res) => {
+    await run(`DELETE FROM ${tableName} WHERE id=?`, [Number(req.params.id)]);
+    res.json({ ok: true });
+  });
 }
 
-async function generateDocxStub(entityType, entityId) {
-  return Buffer.from(`ANAGAMI ${entityType.toUpperCase()} #${entityId}`);
-}
+registerCrudRoutes('/api/admin/prompts', 'manager', 'prompts', [
+  { name: 'module', max: 40 },
+  { name: 'language', max: 5 },
+  { name: 'version', max: 10 },
+  { name: 'content', max: 4000 },
+  { name: 'is_active', max: 1 },
+  { name: 'created_by', max: 20 }
+]);
 
-async function convertToPdf(docxBuffer) {
-  const base = `/tmp/anagami_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const input = `${base}.docx`;
-  const outDir = '/tmp';
-  const outPdf = `${base}.pdf`;
-  await fs.promises.writeFile(input, docxBuffer);
-  try {
-    await execFileAsync('libreoffice', ['--headless', '--convert-to', 'pdf', '--outdir', outDir, input]);
-    return await fs.promises.readFile(outPdf);
-  } finally {
-    fs.promises.unlink(input).catch(() => {});
-    fs.promises.unlink(outPdf).catch(() => {});
-  }
-}
+registerCrudRoutes('/api/admin/knowledge', 'manager', 'knowledge_snippets', [
+  { name: 'title', max: 255 },
+  { name: 'body', max: 4000 },
+  { name: 'tags', max: 255 },
+  { name: 'language', max: 5 },
+  { name: 'created_by', max: 20 }
+]);
 
-app.post('/api/offers/:id/export', auth, requirePasswordUpdated, async (req, res) => {
-  const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
-  const docx = await generateDocxStub('offer', req.params.id);
-  let bytes = docx;
-  let mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  if (format === 'pdf') {
-    bytes = await convertToPdf(docx);
-    mime = 'application/pdf';
-  }
-  const fileId = await storeGenerated('offer', req.params.id, format, mime, bytes, req.user.id);
-  res.json({ fileId, downloadUrl: `/api/files/${fileId}/download` });
+registerCrudRoutes('/api/admin/templates', 'manager', 'templates', [
+  { name: 'module', max: 40 },
+  { name: 'language', max: 5 },
+  { name: 'template_type', max: 40 },
+  { name: 'title', max: 255 },
+  { name: 'body', max: 4000 },
+  { name: 'is_active', max: 1 },
+  { name: 'created_by', max: 20 }
+]);
+
+registerCrudRoutes('/api/admin/pricing', 'manager', 'pricing_rules', [
+  { name: 'module', max: 40 },
+  { name: 'service', max: 255 },
+  { name: 'min_price', max: 40 },
+  { name: 'max_price', max: 40 },
+  { name: 'currency', max: 10 },
+  { name: 'notes', max: 500 },
+  { name: 'created_by', max: 20 }
+]);
+
+app.get('/api/usage/local', requireAuth, requireRole('manager'), async (req, res) => {
+  const totals = await get('SELECT COUNT(*) as requests FROM usage_logs');
+  const last24h = await get("SELECT COUNT(*) as requests FROM usage_logs WHERE created_at >= NOW() - INTERVAL '24 hours'");
+  const tokens = await get('SELECT COALESCE(SUM(tokens_in),0) as inTokens, COALESCE(SUM(tokens_out),0) as outTokens FROM usage_logs');
+  res.json({
+    totalRequests: totals.requests,
+    last24hRequests: last24h.requests,
+    inputTokens: tokens.inTokens,
+    outputTokens: tokens.outTokens
+  });
 });
 
-app.post('/api/contracts/:id/export', auth, requirePasswordUpdated, async (req, res) => {
-  const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
-  const docx = await generateDocxStub('contract', req.params.id);
-  let bytes = docx;
-  let mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  if (format === 'pdf') {
-    bytes = await convertToPdf(docx);
-    mime = 'application/pdf';
+app.options('/api/public/generate', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && PUBLIC_ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  const fileId = await storeGenerated('contract', req.params.id, format, mime, bytes, req.user.id);
-  res.json({ fileId, downloadUrl: `/api/files/${fileId}/download` });
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.status(204).end();
 });
 
-app.get('/api/files/:id/download', auth, requirePasswordUpdated, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM generated_files WHERE id=$1', [req.params.id]);
-  if (!rows[0]) return res.status(404).json({ error: 'File not found' });
-  res.setHeader('Content-Type', rows[0].mime_type);
-  res.setHeader('Content-Disposition', `attachment; filename=file_${rows[0].id}.${rows[0].format}`);
-  res.send(rows[0].file_bytes);
+app.post('/api/public/generate', publicGenerateLimiter, requireBodyField('leadText'), async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && !PUBLIC_ALLOWED_ORIGINS.has(origin)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+  if (origin && PUBLIC_ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  const turnstile = await verifyTurnstile(req.body.turnstileToken, req.ip);
+  if (!turnstile.ok) return res.status(400).json({ error: turnstile.error, details: turnstile.details || [] });
+
+  const language = normalizeLanguage(req.body.language);
+  const payload = {
+    leadText: clampText(req.body.leadText),
+    company: clampText(req.body.company, 255),
+    industry: clampText(req.body.industry, 255),
+    budget: clampText(req.body.budget, 255),
+    timeline: clampText(req.body.timeline, 255)
+  };
+
+  if (STORE_PUBLIC_REQUESTS) {
+    await run('INSERT INTO public_requests(ip, language, lead_text) VALUES(?,?,?)', [req.ip, language, payload.leadText]);
+  } else {
+    await run('INSERT INTO public_requests(ip, language, lead_text) VALUES(?,?,NULL)', [req.ip, language]);
+  }
+
+  const prompt = await resolvePrompt('offers', language);
+  const snippets = await resolveKnowledge(language, 'offers', payload.leadText);
+  const templates = await resolveTemplates('offers', language);
+  const pricing = await resolvePricing('offers');
+
+  const generated = await generateStructuredOutput({
+    module: 'offers',
+    language,
+    payload,
+    prompt,
+    snippets,
+    templates,
+    pricing
+  });
+
+  await logUsage('/api/public/generate', req, null, generated.usage.inputTokens, generated.usage.outputTokens);
+  res.json(generated.output);
 });
 
-app.get('/health', async (_req, res) => {
-  await pool.query('SELECT 1');
-  res.json({ status: 'ok' });
+app.use((err, _req, res, _next) => {
+  res.status(500).json({ error: 'Server error', details: String(err.message || err) });
 });
 
 (async () => {
-  await runMigrations();
-  await seedAdmin();
-  app.listen(PORT, () => console.log(`Anagami AI Core listening on :${PORT}`));
+  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
+  try {
+    await get('SELECT 1');
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    process.exit(1);
+  }
+  app.listen(PORT, () => {
+    console.log(`Anagami AI Core listening on http://localhost:${PORT}`);
+  });
 })();
