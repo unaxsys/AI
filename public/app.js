@@ -151,6 +151,12 @@ async function login() {
       throw error;
     }
 
+    if (!response.ok) {
+      const error = new Error(body.error || 'Login failed');
+      error.status = response.status;
+      throw error;
+    }
+
     if (!body?.token) {
       throw new Error('Missing auth token');
     }
