@@ -1,0 +1,10 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS language_preference text NOT NULL DEFAULT 'bg';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_preference text NOT NULL DEFAULT 'dark';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_bytes bytea;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime_type text;
