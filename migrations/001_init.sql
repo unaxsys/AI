@@ -107,6 +107,4 @@ CREATE TABLE IF NOT EXISTS public_requests (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_prompts_module_language_active ON prompts(module, language, is_active);
-CREATE INDEX IF NOT EXISTS idx_tasks_module_created_at ON tasks(module, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON usage_logs(created_at DESC);
