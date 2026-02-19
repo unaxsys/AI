@@ -14,7 +14,7 @@ const I18N = {
     loginEmail: 'Имейл',
     loginPassword: 'Парола',
     loginBtn: 'Вход',
-    tabs: { email: 'Имейл отговори', offers: 'Оферти', contracts: 'Договори', support: 'Поддръжка', marketing: 'Маркетинг', recruiting: 'Подбор', admin: 'Админ' },
+    tabs: { email: 'Имейл отговори', offers: 'Оферти', contracts: 'Договори', support: 'Поддръжка', marketing: 'Маркетинг', recruiting: 'Подбор', escalations: 'Управление на ескалации', sales: 'Sales', accounting: 'Счетоводни проблеми', tax: 'Данъчни проблеми', cases: 'Казуси (НАП/фирми)', procedures: 'Правила и процедури', admin: 'Админ' },
     userMenu: { profile: 'Профил', settings: 'Настройки', password: 'Смяна на паролата', logout: 'Изход' },
     searchPlaceholder: 'Търсене в историята',
     refresh: 'Обнови',
@@ -48,7 +48,7 @@ const I18N = {
   },
   en: {
     loginEmail: 'Email', loginPassword: 'Password', loginBtn: 'Login',
-    tabs: { email: 'Email Replies', offers: 'Offers', contracts: 'Contracts', support: 'Support', marketing: 'Marketing', recruiting: 'Recruiting', admin: 'Admin' },
+    tabs: { email: 'Email Replies', offers: 'Offers', contracts: 'Contracts', support: 'Support', marketing: 'Marketing', recruiting: 'Recruiting', escalations: 'Escalation Management', sales: 'Sales', accounting: 'Accounting Issues', tax: 'Tax Issues', cases: 'Cases (NRA/Companies)', procedures: 'Rules & Procedures', admin: 'Admin' },
     userMenu: { profile: 'Profile', settings: 'Settings', password: 'Change password', logout: 'Logout' },
     searchPlaceholder: 'Search history', refresh: 'Refresh', taskInput: 'Task input', createTask: 'Create Task', generateDraft: 'Generate Draft', saveFinal: 'Save Final', approve: 'Approve', history: 'History',
     profileTitle: 'Profile', saveProfile: 'Save profile', settingsTitle: 'Settings', language: 'Language', saveSettings: 'Save settings',

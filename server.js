@@ -98,7 +98,13 @@ function sectionsForAgent(code) {
     marketing: ['analysis', 'marketing_copy', 'upsell'],
     recruiting: ['analysis', 'recruiting_jd', 'recruiting_reply'],
     offers: ['analysis', 'service', 'pricing', 'proposal_draft', 'email_draft', 'upsell'],
-    contracts: ['contract_summary', 'terms']
+    contracts: ['contract_summary', 'terms'],
+    escalations: ['analysis', 'support_classification', 'support_reply'],
+    sales: ['analysis', 'service', 'pricing', 'email_draft', 'upsell'],
+    accounting: ['analysis', 'support_reply', 'terms'],
+    tax: ['analysis', 'support_reply', 'terms'],
+    cases: ['analysis', 'terms', 'email_draft'],
+    procedures: ['analysis', 'terms']
   };
   return map[code] || ['analysis'];
 }
