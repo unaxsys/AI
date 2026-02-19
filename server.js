@@ -41,14 +41,28 @@ function assertModule(moduleCode) {
   return DEFAULT_MODULES.includes(moduleCode);
 }
 
+let usageLoggingEnabled = true;
+
 async function logUsage(endpoint, req, userId = null, tokensIn = 0, tokensOut = 0) {
-  await run('INSERT INTO usage_logs(endpoint, ip, user_id, tokens_in, tokens_out) VALUES(?,?,?,?,?)', [
-    endpoint,
-    req.ip,
-    userId,
-    tokensIn,
-    tokensOut
-  ]);
+  if (!usageLoggingEnabled) return;
+
+  try {
+    await run('INSERT INTO usage_logs(endpoint, ip, user_id, tokens_in, tokens_out) VALUES(?,?,?,?,?)', [
+      endpoint,
+      req.ip,
+      userId,
+      tokensIn,
+      tokensOut
+    ]);
+  } catch (error) {
+    if (error && error.code === '42P01') {
+      usageLoggingEnabled = false;
+      console.warn('usage_logs table is missing; usage logging is disabled until migration is applied.');
+      return;
+    }
+
+    console.error('usage logging failed:', error.message || error);
+  }
 }
 
 async function resolvePrompt(moduleCode, language) {
