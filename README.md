@@ -1,6 +1,6 @@
 # Anagami AI Core
 
-Node 18+ internal/public generator platform using **Express + SQLite + Vanilla JS**.
+Node 18+ internal/public generator platform using **Express + PostgreSQL + Vanilla JS**.
 
 ## Features
 
@@ -20,25 +20,18 @@ Node 18+ internal/public generator platform using **Express + SQLite + Vanilla J
 - Public guardrails:
   - 10 req/IP/hour on `/api/public/generate`
   - max input 4000 chars
-  - CORS allow-list: `anagami.bg`, `www.anagami.bg`
+  - CORS allow-list: `https://anagami.bg`, `https://www.anagami.bg`
   - no full lead-text storage unless `STORE_PUBLIC_REQUESTS=true`
 - `/api/health` and `/api/usage/local` monitoring endpoints.
 
 ## Environment
 
-Create `.env`:
+Copy `.env.example` to `.env` and fill values.
 
-```bash
-OPENAI_API_KEY=your_openai_key
-JWT_SECRET=replace_with_long_secret
-ADMIN_EMAIL=admin@anagami.bg
-ADMIN_PASSWORD=change_me_now
-TURNSTILE_SECRET=
-STORE_PUBLIC_REQUESTS=false
-PORT=8789
-```
-
-`OPENAI_API_KEY` and `JWT_SECRET` are required.
+Required:
+- `OPENAI_API_KEY`
+- `JWT_SECRET`
+- database config via either `DATABASE_URL` or `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS`
 
 ## Run commands
 
@@ -49,9 +42,24 @@ npm start
 ```
 
 Open:
-
 - Staff app: `http://localhost:8789/`
 - Public generator: `http://localhost:8789/offer.html`
+
+## Deploy on /opt/ai (pm2)
+
+```bash
+cd /opt/ai
+npm install
+npm run migrate
+pm2 restart anagami-ai-core --update-env
+```
+
+If the app is not registered in pm2 yet:
+
+```bash
+cd /opt/ai
+pm2 start server.js --name anagami-ai-core --update-env
+```
 
 ## API highlights
 

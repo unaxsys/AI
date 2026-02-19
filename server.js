@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 
-const { initializeDb, run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
+const { initDb, run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
 const { signToken, requireAuth, requireRole } = require('./auth');
 const { generateStructuredOutput } = require('./openai');
 const { publicGenerateLimiter, loginLimiter } = require('./rateLimit');
@@ -53,7 +53,7 @@ async function logUsage(endpoint, req, userId = null, tokensIn = 0, tokensOut = 
 
 async function resolvePrompt(moduleCode, language) {
   const active = await get(
-    'SELECT content FROM prompts WHERE module=? AND language=? AND is_active=1 ORDER BY version DESC LIMIT 1',
+    'SELECT content FROM prompts WHERE module=? AND language=? AND is_active=true ORDER BY version DESC LIMIT 1',
     [moduleCode, language]
   );
   if (active) return active.content;
@@ -73,7 +73,7 @@ async function resolveKnowledge(language, moduleCode, leadText) {
 
 async function resolveTemplates(moduleCode, language) {
   const rows = await all(
-    'SELECT title, body, template_type FROM templates WHERE module=? AND language=? AND is_active=1 ORDER BY id DESC LIMIT 3',
+    'SELECT title, body, template_type FROM templates WHERE module=? AND language=? AND is_active=true ORDER BY id DESC LIMIT 3',
     [moduleCode, language]
   );
   return rows.map((r) => `${r.template_type} :: ${r.title}\n${r.body}`);
@@ -99,12 +99,12 @@ app.get('/api/health', async (_req, res) => {
 app.post('/api/auth/login', loginLimiter, requireBodyField('email', 255), requireBodyField('password', 255), async (req, res) => {
   const email = String(req.body.email).toLowerCase();
   const user = await get('SELECT * FROM users WHERE email=?', [email]);
-  if (!user || !user.is_active) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!user || user.is_active !== true) return res.status(401).json({ error: 'Invalid credentials' });
 
   const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-  await run('UPDATE users SET last_login_at=datetime(\'now\') WHERE id=?', [user.id]);
+  await run('UPDATE users SET last_login_at=NOW() WHERE id=?', [user.id]);
   await logUsage('/api/auth/login', req, user.id);
   return res.json({
     token: signToken(user),
@@ -186,7 +186,7 @@ app.post('/api/tasks/:id/generate', requireAuth, requireRole('agent'), async (re
         raw_output=excluded.raw_output,
         input_tokens=excluded.input_tokens,
         output_tokens=excluded.output_tokens,
-        updated_at=datetime('now')`,
+        updated_at=NOW()`,
       [
         taskId,
         task.language,
@@ -202,14 +202,14 @@ app.post('/api/tasks/:id/generate', requireAuth, requireRole('agent'), async (re
       ]
     );
 
-    await run('UPDATE tasks SET updated_at=datetime(\'now\') WHERE id=?', [taskId]);
+    await run('UPDATE tasks SET updated_at=NOW() WHERE id=?', [taskId]);
     await logUsage('/api/tasks/:id/generate', req, req.user.id, generated.usage.inputTokens, generated.usage.outputTokens);
     return res.json(generated.output);
   } catch (err) {
     await run(
       `INSERT INTO task_outputs(task_id, language, analysis, service, pricing, proposalDraft, emailDraft, upsell, raw_output, input_tokens, output_tokens)
       VALUES(?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(task_id) DO UPDATE SET raw_output=excluded.raw_output, updated_at=datetime('now')`,
+      ON CONFLICT(task_id) DO UPDATE SET raw_output=excluded.raw_output, updated_at=NOW()`,
       [taskId, task.language, '', '', '', '', '', '', String(err.message || err), 0, 0]
     );
     return res.status(500).json({ error: 'Generation failed', details: String(err.message || err) });
@@ -271,16 +271,16 @@ app.patch('/api/tasks/:id/final', requireAuth, requireRole('agent'), async (req,
       proposalDraft=excluded.proposalDraft,
       emailDraft=excluded.emailDraft,
       upsell=excluded.upsell,
-      updated_at=datetime('now')`,
+      updated_at=NOW()`,
     [taskId, language, payload.analysis, payload.service, payload.pricing, payload.proposalDraft, payload.emailDraft, payload.upsell]
   );
-  await run('UPDATE tasks SET updated_at=datetime(\'now\') WHERE id=?', [taskId]);
+  await run('UPDATE tasks SET updated_at=NOW() WHERE id=?', [taskId]);
   await logUsage('/api/tasks/:id/final', req, req.user.id);
   res.json({ ok: true });
 });
 
 app.post('/api/tasks/:id/approve', requireAuth, requireRole('manager'), async (req, res) => {
-  await run('UPDATE tasks SET status=\'approved\', approved_by=?, approved_at=datetime(\'now\'), updated_at=datetime(\'now\') WHERE id=?', [
+  await run('UPDATE tasks SET status=\'approved\', approved_by=?, approved_at=NOW(), updated_at=NOW() WHERE id=?', [
     req.user.id,
     Number(req.params.id)
   ]);
@@ -303,14 +303,14 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), async (req, res)
   if (!email || !name || !password) return res.status(400).json({ error: 'Missing fields' });
 
   const hash = await bcrypt.hash(password, 10);
-  const created = await run('INSERT INTO users(email, name, role, password_hash, is_active) VALUES(?,?,?,?,1)', [email, name, role, hash]);
+  const created = await run('INSERT INTO users(email, name, role, password_hash, is_active) VALUES(?,?,?,?,true)', [email, name, role, hash]);
   await logUsage('/api/admin/users', req, req.user.id);
   res.json({ id: created.lastID });
 });
 
 app.patch('/api/admin/users/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
-  const isActive = Number(req.body.isActive) ? 1 : 0;
-  await run('UPDATE users SET is_active=?, updated_at=datetime(\'now\') WHERE id=?', [isActive, Number(req.params.id)]);
+  const isActive = Boolean(req.body.isActive);
+  await run('UPDATE users SET is_active=?, updated_at=NOW() WHERE id=?', [isActive, Number(req.params.id)]);
   await logUsage('/api/admin/users/:id/status', req, req.user.id);
   res.json({ ok: true });
 });
@@ -319,7 +319,7 @@ app.post('/api/admin/users/:id/reset-password', requireAuth, requireRole('admin'
   const password = clampText(req.body.password, 255);
   if (!password) return res.status(400).json({ error: 'Password required' });
   const hash = await bcrypt.hash(password, 10);
-  await run('UPDATE users SET password_hash=?, updated_at=datetime(\'now\') WHERE id=?', [hash, Number(req.params.id)]);
+  await run('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hash, Number(req.params.id)]);
   await logUsage('/api/admin/users/:id/reset-password', req, req.user.id);
   res.json({ ok: true });
 });
@@ -336,6 +336,10 @@ function registerCrudRoutes(basePath, minRole, tableName, fieldConfig) {
     if (fields.includes('created_by')) {
       const idx = fields.indexOf('created_by');
       values[idx] = req.user.id;
+    }
+    if (fields.includes('is_active')) {
+      const idx = fields.indexOf('is_active');
+      values[idx] = String(values[idx]).toLowerCase() === 'true' || values[idx] === true || values[idx] === '1';
     }
     const placeholders = fields.map(() => '?').join(',');
     const result = await run(`INSERT INTO ${tableName}(${fields.join(',')}) VALUES(${placeholders})`, values);
@@ -400,7 +404,7 @@ registerCrudRoutes('/api/admin/pricing', 'manager', 'pricing_rules', [
 
 app.get('/api/usage/local', requireAuth, requireRole('manager'), async (req, res) => {
   const totals = await get('SELECT COUNT(*) as requests FROM usage_logs');
-  const last24h = await get("SELECT COUNT(*) as requests FROM usage_logs WHERE created_at >= datetime('now', '-1 day')");
+  const last24h = await get("SELECT COUNT(*) as requests FROM usage_logs WHERE created_at >= NOW() - INTERVAL '24 hours'");
   const tokens = await get('SELECT COALESCE(SUM(tokens_in),0) as inTokens, COALESCE(SUM(tokens_out),0) as outTokens FROM usage_logs');
   res.json({
     totalRequests: totals.requests,
@@ -474,7 +478,12 @@ app.use((err, _req, res, _next) => {
 
 (async () => {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
-  await initializeDb();
+  try {
+    await initDb();
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    process.exit(1);
+  }
   app.listen(PORT, () => {
     console.log(`Anagami AI Core listening on http://localhost:${PORT}`);
   });

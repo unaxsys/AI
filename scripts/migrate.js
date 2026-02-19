@@ -1,11 +1,15 @@
 require('dotenv').config();
-const { initializeDb, DB_PATH } = require('../db');
+const { initDb, closeDb } = require('../db');
 
-initializeDb()
-  .then(() => {
-    console.log(`SQLite schema ready at ${DB_PATH}`);
+initDb()
+  .then(async () => {
+    console.log('PostgreSQL migrations applied successfully.');
+    await closeDb();
   })
-  .catch((err) => {
-    console.error(err);
+  .catch(async (err) => {
+    console.error('Migration failed:', err.message);
+    try {
+      await closeDb();
+    } catch (_e) {}
     process.exit(1);
   });

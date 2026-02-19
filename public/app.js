@@ -23,6 +23,13 @@ let me = null;
 let currentModule = 'offers';
 let currentTaskId = null;
 
+function updateModuleVisibility() {
+  const isAdminModule = currentModule === 'admin';
+  document.getElementById('taskWorkspace').classList.toggle('hidden', isAdminModule);
+  document.getElementById('historyPanel').classList.toggle('hidden', isAdminModule);
+  document.getElementById('adminPanel').classList.toggle('hidden', !isAdminModule || !['admin', 'manager'].includes(me?.role));
+}
+
 function getToken() {
   return sessionStorage.getItem(tokenKey);
 }
@@ -80,9 +87,9 @@ async function loadMe() {
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('appView').classList.remove('hidden');
     document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
-    document.getElementById('adminPanel').classList.toggle('hidden', !['admin', 'manager'].includes(me.role));
     renderSections({}, document.getElementById('language').value);
-    loadHistory();
+    updateModuleVisibility();
+    if (currentModule !== 'admin') loadHistory();
   } catch (_e) {
     document.getElementById('loginView').classList.remove('hidden');
     document.getElementById('appView').classList.add('hidden');
@@ -90,6 +97,7 @@ async function loadMe() {
 }
 
 async function loadHistory() {
+  if (currentModule === 'admin') return;
   const q = document.getElementById('search').value;
   const rows = await api(`/api/tasks?module=${encodeURIComponent(currentModule)}&q=${encodeURIComponent(q)}`);
   const history = document.getElementById('history');
@@ -225,7 +233,8 @@ document.querySelectorAll('.moduleBtn').forEach((btn) => {
     currentModule = btn.dataset.module;
     currentTaskId = null;
     document.getElementById('moduleTitle').textContent = btn.textContent;
-    loadHistory();
+    updateModuleVisibility();
+    if (currentModule !== 'admin') loadHistory();
   };
 });
 
