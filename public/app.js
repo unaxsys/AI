@@ -22,6 +22,7 @@ const sectionKeys = ['analysis', 'service', 'pricing', 'proposalDraft', 'emailDr
 let me = null;
 let currentModule = 'offers';
 let currentTaskId = null;
+const authTimeoutMs = 10000;
 
 function updateModuleVisibility() {
   const isAdminModule = currentModule === 'admin';
@@ -70,6 +71,26 @@ async function api(url, options = {}) {
   return data;
 }
 
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = authTimeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const body = await response.json().catch(() => ({}));
+    return { response, body };
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutError = new Error('Request timed out. Please try again.');
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function renderSections(data = {}, lang = 'bg') {
   const root = document.getElementById('sixSections');
   root.innerHTML = '';
@@ -111,12 +132,18 @@ async function login() {
   const password = document.getElementById('loginPassword').value;
 
   try {
-    const response = await fetch('/api/auth/login', {
+    const { response, body } = await fetchJsonWithTimeout('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
     const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const error = new Error(body.error || 'Login failed');
+      error.status = response.status;
+      throw error;
+    }
 
     if (!response.ok) {
       const error = new Error(body.error || 'Login failed');
@@ -131,6 +158,9 @@ async function login() {
     setToken(body.token);
     showApp();
     await loadMe();
+    if (currentModule !== 'admin') {
+      loadHistory().catch(() => {});
+    }
   } catch (err) {
     if (err.status === 401) {
       clearToken();
@@ -140,15 +170,24 @@ async function login() {
 }
 
 async function loadMe() {
-  me = await api('/api/auth/me', {
-    headers: { Authorization: `Bearer ${getToken()}` }
+  const token = getToken();
+  const { response, body } = await fetchJsonWithTimeout('/api/auth/me', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
   });
+
+  if (!response.ok) {
+    const error = new Error(body.error || 'Authentication check failed');
+    error.status = response.status;
+    throw error;
+  }
+
+  me = body;
   document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
   renderSections({}, document.getElementById('language').value);
   updateModuleVisibility();
-  if (currentModule !== 'admin') {
-    await loadHistory();
-  }
 }
 
 async function bootstrapAuth() {
@@ -162,6 +201,9 @@ async function bootstrapAuth() {
   try {
     await loadMe();
     showApp();
+    if (currentModule !== 'admin') {
+      loadHistory().catch(() => {});
+    }
   } catch (err) {
     if (err.status === 401) {
       clearToken();
