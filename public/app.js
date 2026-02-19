@@ -7,6 +7,151 @@ let meState = null;
 const loginView = document.getElementById('loginView');
 const appView = document.getElementById('appView');
 
+let currentLanguage = 'bg';
+
+const I18N = {
+  bg: {
+    loginEmail: 'Имейл',
+    loginPassword: 'Парола',
+    loginBtn: 'Вход',
+    tabs: { email: 'Имейл отговори', offers: 'Оферти', contracts: 'Договори', support: 'Поддръжка', marketing: 'Маркетинг', recruiting: 'Подбор', admin: 'Админ' },
+    userMenu: { profile: 'Профил', settings: 'Настройки', password: 'Смяна на паролата', logout: 'Изход' },
+    searchPlaceholder: 'Търсене в историята',
+    refresh: 'Обнови',
+    taskInput: 'Въведи задача',
+    createTask: 'Създай задача',
+    generateDraft: 'Генерирай чернова',
+    saveFinal: 'Запази финално',
+    approve: 'Одобри',
+    history: 'История',
+    profileTitle: 'Профил',
+    saveProfile: 'Запази профила',
+    settingsTitle: 'Настройки',
+    language: 'Език',
+    saveSettings: 'Запази настройки',
+    passwordTitle: 'Смяна на парола (задължително)',
+    passwordHelp: 'Този акаунт е с временна парола. Моля, въведете нова парола (мин. 8 символа), за да продължите.',
+    newPassword: 'Нова парола',
+    confirmPassword: 'Потвърди паролата',
+    changePassword: 'Смени парола',
+    adminPanels: 'Админ панели',
+    createUserTitle: 'Създаване на потребител',
+    labels: {
+      firstName: 'Име', lastName: 'Фамилия', displayName: 'Показвано име', phone: 'Телефон', jobTitle: 'Позиция', company: 'Компания', bio: 'Био', avatar: 'Снимка на профил',
+      email: 'Email', gender: 'Пол', role: 'Роля', password: 'Парола'
+    },
+    generate: 'Генерирай',
+    copy: 'Копирай',
+    createUser: 'Създай потребител',
+    table: { name: 'Име', email: 'Email', role: 'Роля', status: 'Статус', actions: 'Действия', active: 'активен', inactive: 'неактивен' }
+  },
+  en: {
+    loginEmail: 'Email', loginPassword: 'Password', loginBtn: 'Login',
+    tabs: { email: 'Email Replies', offers: 'Offers', contracts: 'Contracts', support: 'Support', marketing: 'Marketing', recruiting: 'Recruiting', admin: 'Admin' },
+    userMenu: { profile: 'Profile', settings: 'Settings', password: 'Change password', logout: 'Logout' },
+    searchPlaceholder: 'Search history', refresh: 'Refresh', taskInput: 'Task input', createTask: 'Create Task', generateDraft: 'Generate Draft', saveFinal: 'Save Final', approve: 'Approve', history: 'History',
+    profileTitle: 'Profile', saveProfile: 'Save profile', settingsTitle: 'Settings', language: 'Language', saveSettings: 'Save settings',
+    passwordTitle: 'Change password (required)', passwordHelp: 'This account uses a temporary password. Please set a new password (min. 8 chars) to continue.', newPassword: 'New password', confirmPassword: 'Confirm password', changePassword: 'Change password',
+    adminPanels: 'Admin Panels', createUserTitle: 'Create user',
+    labels: { firstName: 'First name', lastName: 'Last name', displayName: 'Display name', phone: 'Phone', jobTitle: 'Job title', company: 'Company', bio: 'Bio', avatar: 'Profile picture', email: 'Email', gender: 'Gender', role: 'Role', password: 'Password' },
+    generate: 'Generate', copy: 'Copy', createUser: 'Create user',
+    table: { name: 'Name', email: 'Email', role: 'Role', status: 'Status', actions: 'Actions', active: 'active', inactive: 'inactive' }
+  }
+};
+
+function setLabelTextByInput(formId, fieldName, text) {
+  const input = document.querySelector(`#${formId} [name="${fieldName}"]`) || (fieldName === 'avatar' ? document.getElementById('avatarInput') : null);
+  if (!input) return;
+  const label = input.closest('label');
+  if (!label) return;
+  const textNode = [...label.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+  if (textNode) textNode.textContent = text;
+}
+
+function translateUI(language) {
+  const tr = I18N[language] || I18N.bg;
+  document.getElementById('email').placeholder = tr.loginEmail;
+  document.getElementById('password').placeholder = tr.loginPassword;
+  document.getElementById('loginBtn').textContent = tr.loginBtn;
+
+  document.querySelectorAll('aside button[data-tab]').forEach((btn) => {
+    btn.textContent = tr.tabs[btn.dataset.tab] || btn.dataset.tab;
+  });
+
+  document.querySelectorAll('#userMenu button[data-user-action]').forEach((btn) => {
+    btn.textContent = tr.userMenu[btn.dataset.userAction] || btn.dataset.userAction;
+  });
+
+  document.getElementById('search').placeholder = tr.searchPlaceholder;
+  document.getElementById('refreshHistory').textContent = tr.refresh;
+  document.getElementById('taskInput').placeholder = tr.taskInput;
+  document.getElementById('createTask').textContent = tr.createTask;
+  document.getElementById('generateDraft').textContent = tr.generateDraft;
+  document.getElementById('saveFinal').textContent = tr.saveFinal;
+  document.getElementById('approveTask').textContent = tr.approve;
+  const historyTitle = document.querySelector('#workspacePanel h3');
+  if (historyTitle) historyTitle.textContent = tr.history;
+
+  const tabTitle = document.getElementById('tabTitle');
+  if (tabTitle && tr.tabs[currentTab]) tabTitle.textContent = tr.tabs[currentTab];
+
+  const passwordPanel = document.getElementById('passwordBox');
+  const pTitle = passwordPanel.querySelector('h3');
+  const pText = passwordPanel.querySelector('p');
+  if (pTitle) pTitle.textContent = tr.passwordTitle;
+  if (pText) pText.textContent = tr.passwordHelp;
+  document.getElementById('newPassword').placeholder = tr.newPassword;
+  document.getElementById('confirmPassword').placeholder = tr.confirmPassword;
+  document.getElementById('changePasswordBtn').textContent = tr.changePassword;
+
+  const profileTitle = document.querySelector('#profilePanel h3');
+  if (profileTitle) profileTitle.textContent = tr.profileTitle;
+  setLabelTextByInput('profileForm', 'firstName', tr.labels.firstName);
+  setLabelTextByInput('profileForm', 'lastName', tr.labels.lastName);
+  setLabelTextByInput('profileForm', 'displayName', tr.labels.displayName);
+  setLabelTextByInput('profileForm', 'phone', tr.labels.phone);
+  setLabelTextByInput('profileForm', 'jobTitle', tr.labels.jobTitle);
+  setLabelTextByInput('profileForm', 'company', tr.labels.company);
+  setLabelTextByInput('profileForm', 'bio', tr.labels.bio);
+  setLabelTextByInput('profileForm', 'avatar', tr.labels.avatar);
+  const profileSaveBtn = document.querySelector('#profileForm button[type="submit"]');
+  if (profileSaveBtn) profileSaveBtn.textContent = tr.saveProfile;
+
+  const settingsTitle = document.querySelector('#settingsPanel h3');
+  if (settingsTitle) settingsTitle.textContent = tr.settingsTitle;
+  const settingsLabel = document.querySelector('#settingsPanel label');
+  if (settingsLabel) {
+    const tn = [...settingsLabel.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+    if (tn) tn.textContent = tr.language;
+  }
+  document.getElementById('saveSettingsBtn').textContent = tr.saveSettings;
+
+  const adminTitle = document.querySelector('#adminPanel h3');
+  if (adminTitle) adminTitle.textContent = tr.adminPanels;
+  const adminUserH4 = document.querySelector('#adminUsersTab h4');
+  if (adminUserH4) adminUserH4.textContent = tr.createUserTitle;
+
+  setLabelTextByInput('adminCreateUserForm', 'email', tr.labels.email);
+  setLabelTextByInput('adminCreateUserForm', 'firstName', tr.labels.firstName);
+  setLabelTextByInput('adminCreateUserForm', 'lastName', tr.labels.lastName);
+  setLabelTextByInput('adminCreateUserForm', 'gender', tr.labels.gender);
+  setLabelTextByInput('adminCreateUserForm', 'role', tr.labels.role);
+  setLabelTextByInput('adminCreateUserForm', 'password', tr.labels.password);
+  document.getElementById('generatePasswordBtn').textContent = tr.generate;
+  document.getElementById('copyPasswordBtn').textContent = tr.copy;
+  const createUserBtn = document.querySelector('#adminCreateUserForm button[type="submit"]');
+  if (createUserBtn) createUserBtn.textContent = tr.createUser;
+
+  const th = document.querySelectorAll('#adminUsersTable thead th');
+  if (th.length >= 5) {
+    th[0].textContent = tr.table.name;
+    th[1].textContent = tr.table.email;
+    th[2].textContent = tr.table.role;
+    th[3].textContent = tr.table.status;
+    th[4].textContent = tr.table.actions;
+  }
+}
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
@@ -52,7 +197,10 @@ function applyTheme(theme) {
 }
 
 function applyLanguage(language) {
-  document.documentElement.lang = language === 'en' ? 'en' : 'bg';
+  currentLanguage = language === 'en' ? 'en' : 'bg';
+  document.documentElement.lang = currentLanguage;
+  localStorage.setItem('language', currentLanguage);
+  translateUI(currentLanguage);
 }
 
 function setWorkEnabled(enabled) {
@@ -243,7 +391,7 @@ document.querySelectorAll('#userMenu button[data-user-action]').forEach((btn) =>
 document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = () => {
   if (mustChangePassword) return;
   currentTab = b.dataset.tab;
-  document.getElementById('tabTitle').textContent = b.textContent;
+  document.getElementById('tabTitle').textContent = (I18N[currentLanguage] && I18N[currentLanguage].tabs[currentTab]) || b.textContent;
   currentTaskId = null;
   document.getElementById('sections').innerHTML = '';
   setActiveSidebar();
@@ -448,13 +596,13 @@ async function loadAdminUsers() {
 
   res.users.forEach((u) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? 'active' : 'inactive'}</td><td></td>`;
+    tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? I18N[currentLanguage].table.active : I18N[currentLanguage].table.inactive}</td><td></td>`;
     const actionsTd = tr.querySelector('td:last-child');
     const actions = document.createElement('div');
     actions.className = 'table-actions';
 
     const resetBtn = document.createElement('button');
-    resetBtn.textContent = 'Ресет парола';
+    resetBtn.textContent = currentLanguage === 'bg' ? 'Ресет парола' : 'Reset password';
     resetBtn.onclick = async () => {
       try {
         await resetUserPassword(u.id);
@@ -466,7 +614,7 @@ async function loadAdminUsers() {
 
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'btn-warning';
-    toggleBtn.textContent = u.isActive ? 'Деактивирай' : 'Активирай';
+    toggleBtn.textContent = u.isActive ? (currentLanguage === 'bg' ? 'Деактивирай' : 'Deactivate') : (currentLanguage === 'bg' ? 'Активирай' : 'Activate');
     toggleBtn.onclick = async () => {
       try {
         await toggleUserActive(u);
@@ -479,7 +627,7 @@ async function loadAdminUsers() {
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'btn-danger';
-    deleteBtn.textContent = 'Изтрий';
+    deleteBtn.textContent = currentLanguage === 'bg' ? 'Изтрий' : 'Delete';
     deleteBtn.onclick = async () => {
       try {
         await deleteUser(u);
@@ -508,4 +656,5 @@ document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((btn) => 
 });
 
 applyTheme(localStorage.getItem('theme') || 'dark');
+applyLanguage(localStorage.getItem('language') || 'bg');
 loadMe();
