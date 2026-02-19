@@ -39,6 +39,7 @@ async function auth(req, res, next) {
     const { rows } = await pool.query('SELECT * FROM users WHERE id=$1 AND is_active=true', [payload.sub]);
     if (!rows[0]) return res.status(401).json({ error: 'Unauthorized' });
     req.user = rows[0];
+    await pool.query('UPDATE users SET last_seen_at=now() WHERE id=$1', [rows[0].id]);
     next();
   } catch {
     res.status(401).json({ error: 'Unauthorized' });
@@ -58,25 +59,25 @@ function adminOnly(req, res, next) {
 }
 
 async function seedAdmin() {
-  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [DEFAULT_ADMIN_EMAIL]);
-  if (!rows[0]) {
-    await pool.query(
-      'INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password) VALUES ($1,$2,$3,$4,true,true)',
-      [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
-    );
-    return;
-  }
+  if (rows[0]) return;
 
+  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
   await pool.query(
-    'UPDATE users SET password_hash=$1, role=$2, is_active=true, must_change_password=true, updated_at=now() WHERE email=$3',
-    [hash, 'admin', DEFAULT_ADMIN_EMAIL]
+    `INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password)
+     VALUES ($1,$2,$3,$4,true,true)`,
+    [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
   );
 }
 
 async function runMigrations() {
-  const sql = fs.readFileSync(path.join(__dirname, 'migrations', '001_init.sql'), 'utf8');
-  await pool.query(sql);
+  const migrationsDir = path.join(__dirname, 'migrations');
+  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+    // eslint-disable-next-line no-await-in-loop
+    await pool.query(sql);
+  }
   await pool.query("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'manager'");
 }
 
@@ -130,7 +131,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   if (!user || !user.is_active) return res.status(401).json({ error: 'Invalid credentials' });
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-  await pool.query('UPDATE users SET last_login_at=now() WHERE id=$1', [user.id]);
+  await pool.query('UPDATE users SET last_login_at=now(), last_seen_at=now() WHERE id=$1', [user.id]);
   res.json({
     token: signToken(user),
     user: {
@@ -149,8 +150,66 @@ app.get('/api/auth/me', auth, async (req, res) => {
     role: req.user.role,
     email: req.user.email,
     displayName: req.user.display_name,
-    mustChangePassword: req.user.must_change_password
+    mustChangePassword: req.user.must_change_password,
+    firstName: req.user.first_name || '',
+    lastName: req.user.last_name || '',
+    phone: req.user.phone || '',
+    jobTitle: req.user.job_title || '',
+    company: req.user.company || '',
+    bio: req.user.bio || '',
+    language: req.user.language_preference || 'bg',
+    theme: req.user.theme_preference || 'dark',
+    avatarUrl: req.user.avatar_bytes ? `data:${req.user.avatar_mime_type || 'image/png'};base64,${req.user.avatar_bytes.toString('base64')}` : ''
   });
+});
+
+app.get('/api/profile', auth, async (req, res) => {
+  const profile = {
+    displayName: req.user.display_name,
+    firstName: req.user.first_name || '',
+    lastName: req.user.last_name || '',
+    phone: req.user.phone || '',
+    jobTitle: req.user.job_title || '',
+    company: req.user.company || '',
+    bio: req.user.bio || '',
+    language: req.user.language_preference || 'bg',
+    theme: req.user.theme_preference || 'dark',
+    avatarUrl: req.user.avatar_bytes ? `data:${req.user.avatar_mime_type || 'image/png'};base64,${req.user.avatar_bytes.toString('base64')}` : ''
+  };
+
+  // Alias for UI that calls /api/profile
+  return res.json({ ok: true, user: req.user, profile });
+});
+
+app.all('/api/profile', auth, async (req, res, next) => {
+  if (!['PATCH', 'POST', 'PUT'].includes(req.method)) return next();
+  const firstName = String(req.body.firstName || '').trim();
+  const lastName = String(req.body.lastName || '').trim();
+  const displayName = String(req.body.displayName || `${firstName} ${lastName}`.trim() || req.user.display_name).trim();
+  const phone = String(req.body.phone || '').trim();
+  const jobTitle = String(req.body.jobTitle || '').trim();
+  const company = String(req.body.company || '').trim();
+  const bio = String(req.body.bio || '').trim();
+  const language = ['bg', 'en'].includes(String(req.body.language || '').trim()) ? String(req.body.language).trim() : (req.user.language_preference || 'bg');
+  const theme = ['dark', 'light'].includes(String(req.body.theme || '').trim()) ? String(req.body.theme).trim() : (req.user.theme_preference || 'dark');
+
+  await pool.query(
+    `UPDATE users
+     SET display_name=$1, first_name=$2, last_name=$3, phone=$4, job_title=$5, company=$6, bio=$7,
+         language_preference=$8, theme_preference=$9, updated_at=now()
+     WHERE id=$10`,
+    [displayName, firstName, lastName, phone, jobTitle, company, bio, language, theme, req.user.id]
+  );
+
+  res.json({ ok: true });
+});
+
+app.post('/api/profile/avatar', auth, upload.single('avatar'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Avatar file is required' });
+  if (!req.file.mimetype.startsWith('image/')) return res.status(400).json({ ok: false, error: 'Invalid image file' });
+
+  await pool.query('UPDATE users SET avatar_bytes=$1, avatar_mime_type=$2, updated_at=now() WHERE id=$3', [req.file.buffer, req.file.mimetype, req.user.id]);
+  return res.json({ ok: true });
 });
 
 app.post('/api/profile/change-password', auth, async (req, res) => {
@@ -278,6 +337,34 @@ app.get('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (_req
   });
 });
 
+app.get('/api/admin/sessions', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, email, display_name, role, is_active, last_login_at, last_seen_at,
+            (last_seen_at IS NOT NULL AND last_seen_at > now() - interval '5 minutes') AS is_online
+     FROM users
+     ORDER BY display_name ASC`
+  );
+
+  const sessions = rows.map((row) => {
+    const durationSec = row.is_online && row.last_login_at
+      ? Math.max(0, Math.floor((Date.now() - new Date(row.last_login_at).getTime()) / 1000))
+      : null;
+    return {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      role: row.role,
+      isActive: row.is_active,
+      isOnline: row.is_online,
+      lastLoginAt: row.last_login_at,
+      lastSeenAt: row.last_seen_at,
+      sessionDurationSec: durationSec
+    };
+  });
+
+  return res.json({ ok: true, sessions });
+});
+
 app.post('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const firstName = String(req.body.firstName || '').trim();
@@ -336,6 +423,16 @@ app.post('/api/admin/users/:id/reset-password', auth, requirePasswordUpdated, ad
   const { rowCount } = await pool.query('UPDATE users SET password_hash=$1, must_change_password=true, updated_at=now() WHERE id=$2', [hash, req.params.id]);
   if (!rowCount) return res.status(404).json({ ok: false, message: 'User not found' });
   return res.json({ ok: true, tempPassword });
+});
+
+
+app.delete('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ ok: false, message: 'Cannot delete current admin user' });
+  }
+  const { rowCount } = await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+  if (!rowCount) return res.status(404).json({ ok: false, message: 'User not found' });
+  return res.json({ ok: true });
 });
 
 app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
