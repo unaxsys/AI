@@ -8,6 +8,7 @@ const { signToken, requireAuth, requireRole } = require('./auth');
 const { generateStructuredOutput } = require('./openai');
 const { publicGenerateLimiter, loginLimiter } = require('./rateLimit');
 const { verifyTurnstile } = require('./turnstile');
+const { migrate } = require('./scripts/migrate');
 
 const app = express();
 const PORT = Number(process.env.PORT || 8789);
@@ -492,12 +493,15 @@ app.use((err, _req, res, _next) => {
 
 (async () => {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
+
   try {
+    await migrate();
     await get('SELECT 1');
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('Startup failed:', error);
     process.exit(1);
   }
+
   app.listen(PORT, () => {
     console.log(`Anagami AI Core listening on http://localhost:${PORT}`);
   });
