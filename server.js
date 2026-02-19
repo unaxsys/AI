@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 
-const { run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
+const { initDb, run, get, all, DEFAULT_MODULES, defaultSalesPrompt } = require('./db');
 const { signToken, requireAuth, requireRole } = require('./auth');
 const { generateStructuredOutput } = require('./openai');
 const { publicGenerateLimiter, loginLimiter } = require('./rateLimit');
@@ -42,28 +42,14 @@ function assertModule(moduleCode) {
   return DEFAULT_MODULES.includes(moduleCode);
 }
 
-let usageLoggingEnabled = true;
-
 async function logUsage(endpoint, req, userId = null, tokensIn = 0, tokensOut = 0) {
-  if (!usageLoggingEnabled) return;
-
-  try {
-    await run('INSERT INTO usage_logs(endpoint, ip, user_id, tokens_in, tokens_out) VALUES(?,?,?,?,?)', [
-      endpoint,
-      req.ip,
-      userId,
-      tokensIn,
-      tokensOut
-    ]);
-  } catch (error) {
-    if (error && error.code === '42P01') {
-      usageLoggingEnabled = false;
-      console.warn('usage_logs table is missing; usage logging is disabled until migration is applied.');
-      return;
-    }
-
-    console.error('usage logging failed:', error.message || error);
-  }
+  await run('INSERT INTO usage_logs(endpoint, ip, user_id, tokens_in, tokens_out) VALUES(?,?,?,?,?)', [
+    endpoint,
+    req.ip,
+    userId,
+    tokensIn,
+    tokensOut
+  ]);
 }
 
 async function resolvePrompt(moduleCode, language) {
@@ -495,10 +481,9 @@ app.use((err, _req, res, _next) => {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
 
   try {
-    await migrate();
-    await get('SELECT 1');
+    await initDb();
   } catch (error) {
-    console.error('Startup failed:', error);
+    console.error('Database initialization failed:', error);
     process.exit(1);
   }
 
