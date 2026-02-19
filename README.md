@@ -35,7 +35,7 @@ Internal multi-agent platform scaffold with Node.js + Express + PostgreSQL.
    ```bash
    npm start
    ```
-5. Open `http://localhost:8787`.
+5. Open `http://localhost:8789`.
 
 ## Placeholder mapping example (DOCX)
 Use placeholders from DB fields such as:
