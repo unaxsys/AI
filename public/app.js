@@ -14,7 +14,7 @@ const I18N = {
     loginEmail: 'Имейл',
     loginPassword: 'Парола',
     loginBtn: 'Вход',
-    tabs: { email: 'Имейл отговори', offers: 'Оферти', contracts: 'Договори', support: 'Поддръжка', marketing: 'Маркетинг', recruiting: 'Подбор', escalations: 'Управление на ескалации', sales: 'Sales', accounting: 'Счетоводни проблеми', tax: 'Данъчни проблеми', cases: 'Казуси (НАП/фирми)', procedures: 'Правила и процедури', admin: 'Админ' },
+    tabs: { email: 'Имейл отговори', offers: 'Оферти', contracts: 'Договори', support: 'Поддръжка', marketing: 'Маркетинг', recruiting: 'Подбор', escalations: 'Управление на ескалации', sales: 'Продажби', accounting: 'Счетоводни проблеми', tax: 'Данъчни проблеми', cases: 'Казуси (НАП/фирми)', procedures: 'Правила и процедури', admin: 'Админ' },
     userMenu: { profile: 'Профил', settings: 'Настройки', password: 'Смяна на паролата', logout: 'Изход' },
     searchPlaceholder: 'Търсене в историята',
     refresh: 'Обнови',
