@@ -72,9 +72,9 @@ aside button.active { background: var(--accent); }
 .admin-user-form { grid-template-columns: repeat(3, minmax(180px, 260px)); align-items:end; column-gap:10px; row-gap:10px; max-width:860px; }
 .admin-user-form .field-short { max-width:260px; }
 .admin-user-form .password-inline { min-width:260px; max-width:260px; }
-.inline-field-actions { display:grid; grid-template-columns: 1fr auto auto; gap:6px; align-items:center; }
-.inline-field-actions input { width:100%; min-width:0; }
-.inline-field-actions button { white-space:nowrap; padding:8px 10px; }
+.inline-field-actions { display:grid; grid-template-columns: 1fr auto auto; gap:6px; align-items:stretch; }
+.inline-field-actions input { width:100%; min-width:0; min-height:38px; }
+.inline-field-actions button { white-space:nowrap; padding:8px 10px; min-height:38px; }
 .admin-user-form > button[type="submit"] { align-self:end; }
 .admin-users-table-wrap { margin-top:10px; overflow:auto; }
 .admin-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
@@ -98,6 +98,13 @@ aside button.active { background: var(--accent); }
 .admin-sessions-table th:nth-child(6), .admin-sessions-table td:nth-child(6) { width:130px; white-space:nowrap; }
 
 .table-actions { display:flex; gap:6px; flex-wrap:wrap; }
+
+.admin-table tbody tr:nth-child(even) { background: color-mix(in oklab, var(--panel), #8aa0c8 8%); }
+.admin-table tbody tr:hover { background: color-mix(in oklab, var(--panel), var(--accent) 10%); }
+.btn-secondary { background:#5f74a3; }
+.btn-compact { padding:6px 9px; font-size:12px; line-height:1.1; }
+.table-actions { gap:5px; }
+
 .table-actions button { padding:6px 10px; font-size:12px; }
 .btn-danger { background:#d9534f; }
 .btn-warning { background:#f0ad4e; color:#1b1b1b; }

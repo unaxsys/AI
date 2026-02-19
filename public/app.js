@@ -44,7 +44,8 @@ const I18N = {
     copy: 'Копирай',
     createUser: 'Създай потребител',
     table: { name: 'Име', email: 'Email', role: 'Роля', status: 'Статус', actions: 'Действия', active: 'активен', inactive: 'неактивен' },
-    sessions: { title: 'Потребителски сесии', refresh: 'Обнови сесиите', user: 'Потребител', loginFrom: 'Логнат от', lastSeen: 'Последна активност', duration: 'Продължителност', online: 'Онлайн', offline: 'Офлайн' }
+    sessions: { title: 'Потребителски сесии', refresh: 'Обнови сесиите', user: 'Потребител', loginFrom: 'Логнат от', lastSeen: 'Последна активност', duration: 'Продължителност', online: 'Онлайн', offline: 'Офлайн' },
+    adminSubtabs: { users: 'Потребители', prompts: 'Промпти', knowledge: 'Знания', templates: 'Шаблони', pricing: 'Цени', agents: 'Агенти', sessions: 'Сесии', audit: 'Одит' }
   },
   en: {
     loginEmail: 'Email', loginPassword: 'Password', loginBtn: 'Login',
@@ -57,7 +58,8 @@ const I18N = {
     labels: { firstName: 'First name', lastName: 'Last name', displayName: 'Display name', phone: 'Phone', jobTitle: 'Job title', company: 'Company', bio: 'Bio', avatar: 'Profile picture', email: 'Email', gender: 'Gender', role: 'Role', password: 'Password' },
     generate: 'Generate', copy: 'Copy', createUser: 'Create user',
     table: { name: 'Name', email: 'Email', role: 'Role', status: 'Status', actions: 'Actions', active: 'active', inactive: 'inactive' },
-    sessions: { title: 'User sessions', refresh: 'Refresh sessions', user: 'User', loginFrom: 'Logged in from', lastSeen: 'Last activity', duration: 'Duration', online: 'Online', offline: 'Offline' }
+    sessions: { title: 'User sessions', refresh: 'Refresh sessions', user: 'User', loginFrom: 'Logged in from', lastSeen: 'Last activity', duration: 'Duration', online: 'Online', offline: 'Offline' },
+    adminSubtabs: { users: 'Users', prompts: 'Prompts', knowledge: 'Knowledge', templates: 'Templates', pricing: 'Pricing', agents: 'Agents', sessions: 'Sessions', audit: 'Audit' }
   }
 };
 
@@ -130,6 +132,9 @@ function translateUI(language) {
 
   const adminTitle = document.querySelector('#adminPanel h3');
   if (adminTitle) adminTitle.textContent = tr.adminPanels;
+  document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((btn) => {
+    btn.textContent = tr.adminSubtabs[btn.dataset.adminTab] || btn.dataset.adminTab;
+  });
   const adminUserH4 = document.querySelector('#adminUsersTab h4');
   if (adminUserH4) adminUserH4.textContent = tr.createUserTitle;
 
@@ -618,6 +623,7 @@ async function loadAdminUsers() {
     actions.className = 'table-actions';
 
     const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn-secondary btn-compact';
     resetBtn.textContent = currentLanguage === 'bg' ? 'Ресет парола' : 'Reset password';
     resetBtn.onclick = async () => {
       try {
@@ -629,7 +635,7 @@ async function loadAdminUsers() {
     };
 
     const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn-warning';
+    toggleBtn.className = 'btn-warning btn-compact';
     toggleBtn.textContent = u.isActive ? (currentLanguage === 'bg' ? 'Деактивирай' : 'Deactivate') : (currentLanguage === 'bg' ? 'Активирай' : 'Activate');
     toggleBtn.onclick = async () => {
       try {
@@ -642,7 +648,7 @@ async function loadAdminUsers() {
     };
 
     const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'btn-danger';
+    deleteBtn.className = 'btn-danger btn-compact';
     deleteBtn.textContent = currentLanguage === 'bg' ? 'Изтрий' : 'Delete';
     deleteBtn.onclick = async () => {
       try {
