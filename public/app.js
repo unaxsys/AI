@@ -11,16 +11,26 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const request = (url) => fetch(url, { ...options, headers });
-  let res = await request(path);
+  const urls = [path];
+  if (typeof path === 'string' && path.startsWith('/api/')) {
+    const basePath = new URL(document.baseURI).pathname.replace(/[^/]*$/, '');
+    urls.push(path.slice(1));
+    urls.push(`${basePath}${path.slice(1)}`);
+  }
 
-  // Fallback for deployments hosted behind a sub-path where absolute /api routes return 404.
-  if (res.status === 404 && typeof path === 'string' && path.startsWith('/api/')) {
-    res = await request(path.slice(1));
+  const uniqueUrls = [...new Set(urls)];
+  let res = null;
+  for (const url of uniqueUrls) {
+    // eslint-disable-next-line no-await-in-loop
+    res = await fetch(url, { ...options, headers });
+    if (res.status !== 404) break;
   }
 
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const attempted = uniqueUrls.join(' -> ');
+    throw new Error(payload.error || `HTTP ${res.status} (${attempted})`);
+  }
   return payload;
 }
 
