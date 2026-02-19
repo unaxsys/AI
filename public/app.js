@@ -54,6 +54,15 @@ function showApp() {
   document.getElementById('appView').classList.remove('hidden');
 }
 
+function applyUserContext(user) {
+  me = user || null;
+  const fallbackName = me?.name || me?.email || 'User';
+  const fallbackRole = me?.role || 'user';
+  document.getElementById('whoami').textContent = `${fallbackName} (${fallbackRole})`;
+  renderSections({}, document.getElementById('language').value);
+  updateModuleVisibility();
+}
+
 async function api(url, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const token = getToken();
@@ -151,19 +160,13 @@ async function login() {
       throw error;
     }
 
-    if (!response.ok) {
-      const error = new Error(body.error || 'Login failed');
-      error.status = response.status;
-      throw error;
-    }
-
     if (!body?.token) {
       throw new Error('Missing auth token');
     }
 
     setToken(body.token);
     showApp();
-    await loadMe();
+    applyUserContext(body.user);
     if (currentModule !== 'admin') {
       loadHistory().catch(() => {});
     }
@@ -190,10 +193,7 @@ async function loadMe() {
     throw error;
   }
 
-  me = body;
-  document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
-  renderSections({}, document.getElementById('language').value);
-  updateModuleVisibility();
+  applyUserContext(body);
 }
 
 async function bootstrapAuth() {
