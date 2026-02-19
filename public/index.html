@@ -46,8 +46,15 @@
         <section id="passwordBox" class="panel hidden">
           <h3>Смяна на парола (задължително)</h3>
           <p>Този акаунт е с временна парола. Моля, въведете нова парола (мин. 8 символа), за да продължите.</p>
-          <div class="actions">
-            <input id="newPassword" type="password" placeholder="Нова парола" />
+          <div class="password-grid">
+            <div class="password-field-wrap">
+              <input id="newPassword" type="password" placeholder="Нова парола" />
+              <button id="toggleNewPassword" type="button" class="password-eye" aria-label="Покажи/скрий новата парола">👁️</button>
+            </div>
+            <div class="password-field-wrap">
+              <input id="confirmPassword" type="password" placeholder="Потвърди паролата" />
+              <button id="toggleConfirmPassword" type="button" class="password-eye" aria-label="Покажи/скрий потвърждението">👁️</button>
+            </div>
             <button id="changePasswordBtn">Смени парола</button>
           </div>
           <p id="passwordError" class="error"></p>

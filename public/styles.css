@@ -53,6 +53,21 @@ aside button.active { background: var(--accent); }
 .admin-tabs button { background:color-mix(in oklab, var(--panel), #0a1530 45%); }
 .admin-tabs button.active { background:var(--accent); }
 
+
+.password-grid { display:grid; gap:10px; max-width:480px; }
+.password-field-wrap { position:relative; }
+.password-field-wrap input { width:100%; padding-right:44px; }
+.password-eye {
+  position:absolute;
+  right:6px;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  border-radius:8px;
+  padding:0;
+}
+
 .theme-toggle {
   position:fixed;
   left:14px;

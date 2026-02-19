@@ -155,13 +155,36 @@ document.getElementById('loginBtn').onclick = async () => {
   }
 };
 
+function bindPasswordVisibilityToggle(toggleId, inputId) {
+  const toggleBtn = document.getElementById(toggleId);
+  const input = document.getElementById(inputId);
+  toggleBtn.onclick = () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    toggleBtn.textContent = show ? '🙈' : '👁️';
+  };
+}
+
+bindPasswordVisibilityToggle('toggleNewPassword', 'newPassword');
+bindPasswordVisibilityToggle('toggleConfirmPassword', 'confirmPassword');
+
 document.getElementById('changePasswordBtn').onclick = async () => {
+  const newPassword = document.getElementById('newPassword').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+
+  if (newPassword !== confirmPassword) {
+    document.getElementById('passwordError').textContent = 'Паролите не съвпадат.';
+    return;
+  }
+
   try {
     await api('/api/profile/change-password', {
       method: 'POST',
-      body: JSON.stringify({ newPassword: document.getElementById('newPassword').value })
+      body: JSON.stringify({ newPassword })
     });
     document.getElementById('passwordError').textContent = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
     mustChangePassword = false;
     hideContextPanels();
     setWorkEnabled(true);
