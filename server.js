@@ -185,7 +185,8 @@ app.get('/api/profile', auth, async (req, res) => {
   });
 });
 
-app.patch('/api/profile', auth, async (req, res) => {
+app.all('/api/profile', auth, async (req, res, next) => {
+  if (!['PATCH', 'POST', 'PUT'].includes(req.method)) return next();
   const firstName = String(req.body.firstName || '').trim();
   const lastName = String(req.body.lastName || '').trim();
   const displayName = String(req.body.displayName || `${firstName} ${lastName}`.trim() || req.user.display_name).trim();

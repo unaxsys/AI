@@ -15,7 +15,10 @@ async function api(path, options = {}) {
   const urls = [path];
   if (typeof path === 'string' && path.startsWith('/api/')) {
     const basePath = new URL(document.baseURI).pathname.replace(/[^/]*$/, '');
-    urls.push(`${basePath}${path.slice(1)}`);
+    const pathNoSlash = path.slice(1);
+    urls.push(`${window.location.origin}${path}`);
+    urls.push(pathNoSlash);
+    urls.push(`${basePath}${pathNoSlash}`);
   }
 
   const uniqueUrls = [...new Set(urls)];
@@ -146,7 +149,7 @@ document.getElementById('themeToggle').onclick = async () => {
   applyTheme(next);
   if (token) {
     try {
-      await api('/api/profile', { method: 'PATCH', body: JSON.stringify({ theme: next }) });
+      await api('/api/profile', { method: 'POST', body: JSON.stringify({ theme: next }) });
     } catch {
       // no-op UI fallback
     }
@@ -320,7 +323,7 @@ document.getElementById('profileForm').onsubmit = async (e) => {
   const form = e.target;
   try {
     await api('/api/profile', {
-      method: 'PATCH',
+      method: 'POST',
       body: JSON.stringify({
         firstName: form.firstName.value,
         lastName: form.lastName.value,
@@ -353,7 +356,7 @@ document.getElementById('profileForm').onsubmit = async (e) => {
 document.getElementById('saveSettingsBtn').onclick = async () => {
   try {
     await api('/api/profile', {
-      method: 'PATCH',
+      method: 'POST',
       body: JSON.stringify({
         language: document.getElementById('languageSelect').value,
         theme: document.body.classList.contains('theme-light') ? 'light' : 'dark'
