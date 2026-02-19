@@ -17,6 +17,8 @@ const execFileAsync = promisify(execFile);
 
 const PORT = Number(process.env.PORT || 8787);
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me';
+const DEFAULT_ADMIN_EMAIL = 'ogi.stoev80@gmail.com';
+const DEFAULT_ADMIN_PASSWORD = '12345678';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -43,19 +45,32 @@ async function auth(req, res, next) {
   }
 }
 
+function requirePasswordUpdated(req, res, next) {
+  if (req.user.must_change_password) {
+    return res.status(403).json({ error: 'Password change required', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }
+  next();
+}
+
 function adminOnly(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   next();
 }
 
 async function seedAdmin() {
-  if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) return;
-  const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [process.env.ADMIN_EMAIL]);
-  if (rows[0]) return;
-  const hash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 10);
+  const hash = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
+  const { rows } = await pool.query('SELECT id FROM users WHERE email=$1', [DEFAULT_ADMIN_EMAIL]);
+  if (!rows[0]) {
+    await pool.query(
+      'INSERT INTO users(email, display_name, password_hash, role, is_active, must_change_password) VALUES ($1,$2,$3,$4,true,true)',
+      [DEFAULT_ADMIN_EMAIL, 'Ogi Stoev', hash, 'admin']
+    );
+    return;
+  }
+
   await pool.query(
-    'INSERT INTO users(email, display_name, password_hash, role, is_active) VALUES ($1,$2,$3,$4,true)',
-    [process.env.ADMIN_EMAIL, process.env.ADMIN_NAME || 'Administrator', hash, 'admin']
+    'UPDATE users SET password_hash=$1, role=$2, is_active=true, must_change_password=true, updated_at=now() WHERE email=$3',
+    [hash, 'admin', DEFAULT_ADMIN_EMAIL]
   );
 }
 
@@ -114,19 +129,42 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
   await pool.query('UPDATE users SET last_login_at=now() WHERE id=$1', [user.id]);
-  res.json({ token: signToken(user), user: { id: user.id, role: user.role, email: user.email, displayName: user.display_name } });
+  res.json({
+    token: signToken(user),
+    user: {
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      displayName: user.display_name,
+      mustChangePassword: user.must_change_password
+    }
+  });
 });
 
 app.get('/api/auth/me', auth, async (req, res) => {
-  res.json({ id: req.user.id, role: req.user.role, email: req.user.email, displayName: req.user.display_name });
+  res.json({
+    id: req.user.id,
+    role: req.user.role,
+    email: req.user.email,
+    displayName: req.user.display_name,
+    mustChangePassword: req.user.must_change_password
+  });
 });
 
-app.get('/api/agents', auth, async (_req, res) => {
+app.post('/api/profile/change-password', auth, async (req, res) => {
+  const newPassword = String(req.body.newPassword || '');
+  if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 chars' });
+  const hash = await bcrypt.hash(newPassword, 10);
+  await pool.query('UPDATE users SET password_hash=$1, must_change_password=false, updated_at=now() WHERE id=$2', [hash, req.user.id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/agents', auth, requirePasswordUpdated, async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM agents WHERE is_enabled=true ORDER BY id');
   res.json(rows);
 });
 
-app.post('/api/tasks', auth, async (req, res) => {
+app.post('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
   const { agentId, inputText } = req.body;
   const text = String(inputText || '').trim();
   if (!text || text.length > 8000) return res.status(400).json({ error: 'Invalid input' });
@@ -134,7 +172,7 @@ app.post('/api/tasks', auth, async (req, res) => {
   res.status(201).json(r.rows[0]);
 });
 
-app.get('/api/tasks', auth, async (req, res) => {
+app.get('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
   const q = String(req.query.q || '').trim();
   const agentId = req.query.agentId;
   const params = [req.user.id];
@@ -146,14 +184,14 @@ app.get('/api/tasks', auth, async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/tasks/:id', auth, async (req, res) => {
+app.get('/api/tasks/:id', auth, requirePasswordUpdated, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM tasks WHERE id=$1 AND created_by=$2', [req.params.id, req.user.id]);
   if (!rows[0]) return res.status(404).json({ error: 'Not found' });
   const sections = await pool.query('SELECT * FROM task_sections WHERE task_id=$1 ORDER BY id', [req.params.id]);
   res.json({ task: rows[0], sections: sections.rows });
 });
 
-app.post('/api/tasks/:id/generate', auth, async (req, res) => {
+app.post('/api/tasks/:id/generate', auth, requirePasswordUpdated, async (req, res) => {
   const taskId = req.params.id;
   const t = await pool.query('SELECT t.*, a.code FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=$1 AND t.created_by=$2', [taskId, req.user.id]);
   const task = t.rows[0];
@@ -188,7 +226,7 @@ app.post('/api/tasks/:id/generate', auth, async (req, res) => {
   res.json({ sections: sections.rows });
 });
 
-app.patch('/api/tasks/:id/sections', auth, async (req, res) => {
+app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, res) => {
   const updates = Array.isArray(req.body.sections) ? req.body.sections : [];
   for (const row of updates) {
     await pool.query('UPDATE task_sections SET content_final=$1, updated_at=now() WHERE task_id=$2 AND section_type=$3', [String(row.contentFinal || ''), req.params.id, row.sectionType]);
@@ -197,12 +235,12 @@ app.patch('/api/tasks/:id/sections', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/tasks/:id/approve', auth, async (req, res) => {
+app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res) => {
   await pool.query('UPDATE tasks SET status=$2, approved_by=$3, approved_at=now(), updated_at=now() WHERE id=$1 AND created_by=$3', [req.params.id, 'approved', req.user.id]);
   res.json({ ok: true });
 });
 
-app.post('/api/offers', auth, async (req, res) => {
+app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
   const { clientCompany, clientName, clientEmail, leadText, currency = 'BGN', vatMode = 'standard' } = req.body;
   const activePricing = await pool.query('SELECT * FROM pricing_versions WHERE is_active=true ORDER BY id DESC LIMIT 1');
   const offer = await pool.query(
@@ -214,69 +252,69 @@ app.post('/api/offers', auth, async (req, res) => {
   res.status(201).json({ offer: offer.rows[0], pricingConfigured: Boolean(activePricing.rows[0]) });
 });
 
-app.post('/api/contracts', auth, async (req, res) => {
+app.post('/api/contracts', auth, requirePasswordUpdated, async (req, res) => {
   const { contractType, clientCompany, clientName, clientEmail } = req.body;
   const r = await pool.query('INSERT INTO contracts(created_by,contract_type,client_company,client_name,client_email,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.user.id, contractType || 'general', clientCompany, clientName, clientEmail, 'draft']);
   await pool.query('INSERT INTO contract_sections(contract_id, section_type, content) VALUES ($1,$2,$3)', [r.rows[0].id, 'contract_summary', 'Contract scaffold ready.']);
   res.status(201).json(r.rows[0]);
 });
 
-app.get('/api/admin/users', auth, adminOnly, async (_req, res) => {
-  const { rows } = await pool.query('SELECT id,email,display_name,role,is_active,created_at,last_login_at FROM users ORDER BY created_at DESC');
+app.get('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  const { rows } = await pool.query('SELECT id,email,display_name,role,is_active,created_at,last_login_at,must_change_password FROM users ORDER BY created_at DESC');
   res.json(rows);
 });
 
-app.post('/api/admin/users', auth, adminOnly, async (req, res) => {
+app.post('/api/admin/users', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const hash = await bcrypt.hash(String(req.body.password || 'Change123!'), 10);
-  const { rows } = await pool.query('INSERT INTO users(email,display_name,password_hash,role,is_active) VALUES($1,$2,$3,$4,true) RETURNING id,email,display_name,role,is_active', [req.body.email, req.body.displayName, hash, req.body.role || 'user']);
+  const { rows } = await pool.query('INSERT INTO users(email,display_name,password_hash,role,is_active,must_change_password) VALUES($1,$2,$3,$4,true,$5) RETURNING id,email,display_name,role,is_active,must_change_password', [req.body.email, req.body.displayName, hash, req.body.role || 'user', Boolean(req.body.mustChangePassword)]);
   res.status(201).json(rows[0]);
 });
 
-app.patch('/api/admin/users/:id', auth, adminOnly, async (req, res) => {
-  await pool.query('UPDATE users SET role=COALESCE($1,role), is_active=COALESCE($2,is_active), updated_at=now() WHERE id=$3', [req.body.role, req.body.isActive, req.params.id]);
+app.patch('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  await pool.query('UPDATE users SET role=COALESCE($1,role), is_active=COALESCE($2,is_active), must_change_password=COALESCE($3,must_change_password), updated_at=now() WHERE id=$4', [req.body.role, req.body.isActive, req.body.mustChangePassword, req.params.id]);
   if (req.body.newPassword) {
     const hash = await bcrypt.hash(String(req.body.newPassword), 10);
-    await pool.query('UPDATE users SET password_hash=$1, updated_at=now() WHERE id=$2', [hash, req.params.id]);
+    await pool.query('UPDATE users SET password_hash=$1, must_change_password=true, updated_at=now() WHERE id=$2', [hash, req.params.id]);
   }
   res.json({ ok: true });
 });
 
-app.get('/api/admin/prompts', auth, adminOnly, async (_req, res) => {
+app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
   const { rows } = await pool.query('SELECT apv.*, a.code agent_code FROM agent_prompt_versions apv JOIN agents a ON a.id=apv.agent_id ORDER BY apv.created_at DESC LIMIT 200');
   res.json(rows);
 });
 
-app.post('/api/admin/prompts', auth, adminOnly, async (req, res) => {
+app.post('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const v = await pool.query('SELECT COALESCE(MAX(version_no),0)+1 n FROM agent_prompt_versions WHERE agent_id=$1', [req.body.agentId]);
   if (req.body.isActive) await pool.query('UPDATE agent_prompt_versions SET is_active=false WHERE agent_id=$1', [req.body.agentId]);
   const { rows } = await pool.query('INSERT INTO agent_prompt_versions(agent_id,version_no,system_prompt_text,is_active) VALUES ($1,$2,$3,$4) RETURNING *', [req.body.agentId, v.rows[0].n, req.body.systemPromptText, Boolean(req.body.isActive)]);
   res.status(201).json(rows[0]);
 });
 
-app.get('/api/admin/knowledge', auth, adminOnly, async (req, res) => {
+app.get('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM knowledge_documents WHERE agent_id=$1 ORDER BY created_at DESC', [req.query.agentId]);
   res.json(rows);
 });
 
-app.post('/api/admin/knowledge', auth, adminOnly, async (req, res) => {
+app.post('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const { rows } = await pool.query('INSERT INTO knowledge_documents(agent_id,title,content_text,source) VALUES($1,$2,$3,$4) RETURNING *', [req.body.agentId, req.body.title, req.body.contentText, req.body.source]);
   res.status(201).json(rows[0]);
 });
 
-app.post('/api/admin/templates', auth, adminOnly, upload.single('file'), async (req, res) => {
+app.post('/api/admin/templates', auth, requirePasswordUpdated, adminOnly, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'File required' });
   if (req.body.isActive === 'true') await pool.query('UPDATE doc_templates SET is_active=false WHERE template_type=$1', [req.body.templateType]);
   const { rows } = await pool.query('INSERT INTO doc_templates(name,template_type,is_active,docx_bytes,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,name,template_type,is_active,created_at', [req.body.name, req.body.templateType, req.body.isActive === 'true', req.file.buffer, req.user.id]);
   res.status(201).json(rows[0]);
 });
 
-app.get('/api/admin/pricing', auth, adminOnly, async (_req, res) => {
+app.get('/api/admin/pricing', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
   const versions = await pool.query('SELECT * FROM pricing_versions ORDER BY created_at DESC');
   const services = await pool.query('SELECT * FROM pricing_services ORDER BY created_at DESC');
   res.json({ versions: versions.rows, services: services.rows });
 });
 
-app.post('/api/admin/pricing/versions', auth, adminOnly, async (req, res) => {
+app.post('/api/admin/pricing/versions', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   if (req.body.isActive) await pool.query('UPDATE pricing_versions SET is_active=false');
   const { rows } = await pool.query('INSERT INTO pricing_versions(name,is_active) VALUES($1,$2) RETURNING *', [req.body.name, Boolean(req.body.isActive)]);
   res.status(201).json(rows[0]);
@@ -299,15 +337,14 @@ async function convertToPdf(docxBuffer) {
   await fs.promises.writeFile(input, docxBuffer);
   try {
     await execFileAsync('libreoffice', ['--headless', '--convert-to', 'pdf', '--outdir', outDir, input]);
-    const pdf = await fs.promises.readFile(outPdf);
-    return pdf;
+    return await fs.promises.readFile(outPdf);
   } finally {
     fs.promises.unlink(input).catch(() => {});
     fs.promises.unlink(outPdf).catch(() => {});
   }
 }
 
-app.post('/api/offers/:id/export', auth, async (req, res) => {
+app.post('/api/offers/:id/export', auth, requirePasswordUpdated, async (req, res) => {
   const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
   const docx = await generateDocxStub('offer', req.params.id);
   let bytes = docx;
@@ -320,7 +357,7 @@ app.post('/api/offers/:id/export', auth, async (req, res) => {
   res.json({ fileId, downloadUrl: `/api/files/${fileId}/download` });
 });
 
-app.post('/api/contracts/:id/export', auth, async (req, res) => {
+app.post('/api/contracts/:id/export', auth, requirePasswordUpdated, async (req, res) => {
   const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
   const docx = await generateDocxStub('contract', req.params.id);
   let bytes = docx;
@@ -333,7 +370,7 @@ app.post('/api/contracts/:id/export', auth, async (req, res) => {
   res.json({ fileId, downloadUrl: `/api/files/${fileId}/download` });
 });
 
-app.get('/api/files/:id/download', auth, async (req, res) => {
+app.get('/api/files/:id/download', auth, requirePasswordUpdated, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM generated_files WHERE id=$1', [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'File not found' });
   res.setHeader('Content-Type', rows[0].mime_type);

@@ -1,16 +1,25 @@
 let token = sessionStorage.getItem('jwt') || '';
 let currentTab = 'email';
 let currentTaskId = null;
+let mustChangePassword = false;
 
 const loginView = document.getElementById('loginView');
 const appView = document.getElementById('appView');
 
 async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}), 'Content-Type': 'application/json' };
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
-  if (!res.ok) throw new Error((await res.json()).error || 'Request failed');
-  return res.json();
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.error || 'Request failed');
+  return payload;
+}
+
+function setWorkEnabled(enabled) {
+  ['createTask', 'generateDraft', 'saveFinal', 'approveTask', 'refreshHistory', 'search', 'taskInput'].forEach((id) => {
+    document.getElementById(id).disabled = !enabled;
+  });
 }
 
 async function loadMe() {
@@ -21,7 +30,10 @@ async function loadMe() {
     appView.classList.remove('hidden');
     document.getElementById('userBadge').textContent = `${me.displayName} (${me.role})`;
     document.getElementById('adminPanel').classList.toggle('hidden', me.role !== 'admin');
-    loadHistory();
+    mustChangePassword = Boolean(me.mustChangePassword);
+    document.getElementById('passwordBox').classList.toggle('hidden', !mustChangePassword);
+    setWorkEnabled(!mustChangePassword);
+    if (!mustChangePassword) loadHistory();
   } catch {
     sessionStorage.removeItem('jwt');
     token = '';
@@ -34,7 +46,26 @@ document.getElementById('loginBtn').onclick = async () => {
     token = data.token;
     sessionStorage.setItem('jwt', token);
     loadMe();
-  } catch (e) { document.getElementById('loginError').textContent = e.message; }
+  } catch (e) {
+    document.getElementById('loginError').textContent = e.message;
+  }
+};
+
+document.getElementById('changePasswordBtn').onclick = async () => {
+  try {
+    await api('/api/profile/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ newPassword: document.getElementById('newPassword').value })
+    });
+    document.getElementById('passwordError').textContent = '';
+    document.getElementById('passwordBox').classList.add('hidden');
+    mustChangePassword = false;
+    setWorkEnabled(true);
+    alert('Паролата е сменена успешно.');
+    loadHistory();
+  } catch (e) {
+    document.getElementById('passwordError').textContent = e.message;
+  }
 };
 
 document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = () => {
@@ -42,7 +73,7 @@ document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = (
   document.getElementById('tabTitle').textContent = b.textContent;
   currentTaskId = null;
   document.getElementById('sections').innerHTML = '';
-  loadHistory();
+  if (!mustChangePassword) loadHistory();
 });
 
 document.getElementById('createTask').onclick = async () => {

@@ -13,6 +13,7 @@ aside { border-right:1px solid #253353; padding:12px; display:flex; flex-directi
 aside button { text-align:left; background:#17233f; }
 main { padding:16px; }
 textarea#taskInput { width:100%; min-height:120px; }
-.actions,.toolbar { display:flex; gap:8px; margin:10px 0; }
+.actions,.toolbar { display:flex; gap:8px; margin:10px 0; align-items:center; }
 #sections textarea { width:100%; min-height:90px; margin-bottom:8px; }
 .error { color:#ff8f8f; min-height:20px; }
+.panel { background:var(--panel); border:1px solid #253353; border-radius:10px; padding:12px; margin-bottom:12px; }

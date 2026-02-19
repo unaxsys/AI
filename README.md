@@ -12,6 +12,12 @@ Internal multi-agent platform scaffold with Node.js + Express + PostgreSQL.
 - Export endpoints for offers/contracts with DOCX/PDF pipeline (PDF conversion via LibreOffice + `/tmp` ephemeral files).
 - Admin endpoints for users, prompts, knowledge, templates, pricing skeleton.
 
+
+## Default admin login
+- Email: `ogi.stoev80@gmail.com`
+- Password: `12345678`
+- On first login (and after admin password reset), the UI forces password change from Profile section before any agent/admin actions.
+
 ## Setup
 1. Create DB and copy env:
    ```bash

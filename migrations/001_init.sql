@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS users (
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  last_login_at timestamptz
+  last_login_at timestamptz,
+  must_change_password boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS agents (
