@@ -3,77 +3,65 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Sales Proposal Agent</title>
+    <title>Anagami AI Core</title>
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
   <body>
-    <main class="container">
-      <section class="hero">
-        <h1>Получете ориентировъчно предложение за минути</h1>
-        <p class="subtitle">
-          Публичен AI инструмент за бърз първоначален проект на търговско предложение.
-        </p>
-      </section>
+    <div id="loginView" class="center-card">
+      <img src="/public/logo.svg" class="logo" alt="Anagami logo" />
+      <h1>Anagami AI Core</h1>
+      <input id="email" type="email" placeholder="Email" />
+      <input id="password" type="password" placeholder="Password" />
+      <button id="loginBtn">Вход</button>
+      <p id="loginError" class="error"></p>
+    </div>
 
-      <section class="card">
-        <form id="proposalForm">
-          <label for="leadText">Опишете вашето запитване</label>
-          <textarea
-            id="leadText"
-            name="leadText"
-            maxlength="4000"
-            required
-            placeholder="Напр. Имаме нужда от редизайн на корпоративен сайт с интеграция на CRM и SEO пакет..."
-          ></textarea>
-
-          <div class="grid">
-            <div>
-              <label for="company_name">Име на компания (по избор)</label>
-              <input id="company_name" name="company_name" type="text" maxlength="200" />
-            </div>
-            <div>
-              <label for="industry">Индустрия (по избор)</label>
-              <input id="industry" name="industry" type="text" maxlength="200" />
-            </div>
-            <div>
-              <label for="approximate_budget">Приблизителен бюджет (по избор)</label>
-              <input id="approximate_budget" name="approximate_budget" type="text" maxlength="200" />
-            </div>
-            <div>
-              <label for="expected_timeline">Очакван срок (по избор)</label>
-              <input id="expected_timeline" name="expected_timeline" type="text" maxlength="200" />
-            </div>
+    <div id="appView" class="layout hidden">
+      <header>
+        <div class="brand"><img src="/public/logo.svg" class="logo" alt="Anagami logo" /><span>Anagami AI Core</span></div>
+        <div id="userBadge"></div>
+      </header>
+      <aside>
+        <button data-tab="email">Email Replies</button>
+        <button data-tab="offers">Offers</button>
+        <button data-tab="contracts">Contracts</button>
+        <button data-tab="support">Support</button>
+        <button data-tab="marketing">Marketing</button>
+        <button data-tab="recruiting">Recruiting</button>
+        <button data-tab="admin">Admin</button>
+      </aside>
+      <main>
+        <section id="passwordBox" class="panel hidden">
+          <h3>Смяна на парола (задължително)</h3>
+          <p>Този акаунт е с временна парола. Моля, въведете нова парола (мин. 8 символа), за да продължите.</p>
+          <div class="actions">
+            <input id="newPassword" type="password" placeholder="Нова парола" />
+            <button id="changePasswordBtn">Смени парола</button>
           </div>
+          <p id="passwordError" class="error"></p>
+        </section>
 
-          <button type="submit" id="generateBtn">Генерирай предложение</button>
-          <p id="loadingText" class="loading hidden">Генериране... моля, изчакайте.</p>
-          <p class="disclaimer">
-            Генерираното предложение е ориентировъчно и подлежи на потвърждение.
-          </p>
-        </form>
-      </section>
-
-      <section id="result" class="card hidden">
-        <h2>Резултат</h2>
-        <div id="sections"></div>
-        <div class="send-team-box">
-          <h3>Следваща стъпка</h3>
-          <p>
-            Ако искате реална оферта, използвайте бутона „Изпрати към нашия екип“ и изпратете
-            детайлите през контактната ни форма.
-          </p>
-          <a class="secondary-btn" href="#" onclick="alert('Тук можете да свържете контактна форма.'); return false;">
-            Изпрати към нашия екип
-          </a>
+        <div class="toolbar">
+          <input id="search" placeholder="Search history" />
+          <button id="refreshHistory">Refresh</button>
         </div>
-      </section>
-
-      <p id="errorBox" class="error hidden"></p>
-    </main>
-
-    <script>
-      window.SITE_API_KEY = '{{SITE_API_KEY}}';
-    </script>
+        <h2 id="tabTitle">Email Replies</h2>
+        <textarea id="taskInput" placeholder="Task input"></textarea>
+        <div class="actions">
+          <button id="createTask">Create Task</button>
+          <button id="generateDraft">Generate Draft</button>
+          <button id="saveFinal">Save Final</button>
+          <button id="approveTask">Approve</button>
+        </div>
+        <div id="sections"></div>
+        <h3>History</h3>
+        <ul id="history"></ul>
+        <div id="adminPanel" class="hidden">
+          <h3>Admin Panels</h3>
+          <p>Users, Prompts, Knowledge, Templates, Pricing CRUD are available via secured endpoints.</p>
+        </div>
+      </main>
+    </div>
     <script src="/public/app.js"></script>
   </body>
 </html>
