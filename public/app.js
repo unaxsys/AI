@@ -67,8 +67,12 @@ function gatherSections() {
 }
 
 async function login() {
-  const email = document.getElementById('loginEmail').value;
+  const loginError = document.getElementById('loginError');
+  loginError.textContent = '';
+
+  const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
+
   try {
     const data = await api('/api/auth/login', {
       method: 'POST',
@@ -77,7 +81,7 @@ async function login() {
     sessionStorage.setItem(tokenKey, data.token);
     await loadMe();
   } catch (err) {
-    document.getElementById('loginError').textContent = err.message;
+    loginError.textContent = err.message;
   }
 }
 
@@ -216,7 +220,11 @@ async function loadCrud(resource, fields) {
   });
 }
 
-document.getElementById('loginBtn').onclick = login;
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await login();
+});
+
 document.getElementById('logoutBtn').onclick = () => {
   sessionStorage.removeItem(tokenKey);
   location.reload();
