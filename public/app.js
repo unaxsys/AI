@@ -1,4 +1,4 @@
-const tokenKey = 'anagami_token';
+const tokenKey = 'authToken';
 const i18n = {
   bg: {
     analysis: 'Анализ',
@@ -34,13 +34,39 @@ function getToken() {
   return sessionStorage.getItem(tokenKey);
 }
 
+function setToken(token) {
+  sessionStorage.setItem(tokenKey, token);
+}
+
+function clearToken() {
+  sessionStorage.removeItem(tokenKey);
+}
+
+function showLogin(error = '') {
+  document.getElementById('loginView').classList.remove('hidden');
+  document.getElementById('appView').classList.add('hidden');
+  document.getElementById('loginError').textContent = error;
+}
+
+function showApp() {
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('appView').classList.remove('hidden');
+}
+
 async function api(url, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+
   const response = await fetch(url, { ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Request failed');
+
+  if (!response.ok) {
+    const error = new Error(data.error || 'Request failed');
+    error.status = response.status;
+    throw error;
+  }
+
   return data;
 }
 
@@ -74,29 +100,57 @@ async function login() {
   const password = document.getElementById('loginPassword').value;
 
   try {
-    const data = await api('/api/auth/login', {
+    const data = await fetch('/api/auth/login', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(body.error || 'Login failed');
+        error.status = response.status;
+        throw error;
+      }
+      return body;
     });
-    sessionStorage.setItem(tokenKey, data.token);
-    await loadMe();
+
+    if (!data?.token) {
+      throw new Error('Missing auth token');
+    }
+
+    setToken(data.token);
+    await bootstrapAuth();
   } catch (err) {
-    loginError.textContent = err.message;
+    showLogin(err.message || 'Login failed');
   }
 }
 
 async function loadMe() {
+  me = await api('/api/auth/me');
+  document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
+  renderSections({}, document.getElementById('language').value);
+  updateModuleVisibility();
+  if (currentModule !== 'admin') loadHistory();
+}
+
+async function bootstrapAuth() {
+  const token = getToken();
+
+  if (!token) {
+    showLogin('');
+    return;
+  }
+
   try {
-    me = await api('/api/auth/me');
-    document.getElementById('loginView').classList.add('hidden');
-    document.getElementById('appView').classList.remove('hidden');
-    document.getElementById('whoami').textContent = `${me.name} (${me.role})`;
-    renderSections({}, document.getElementById('language').value);
-    updateModuleVisibility();
-    if (currentModule !== 'admin') loadHistory();
-  } catch (_e) {
-    document.getElementById('loginView').classList.remove('hidden');
-    document.getElementById('appView').classList.add('hidden');
+    await loadMe();
+    showApp();
+  } catch (err) {
+    if (err.status === 401) {
+      clearToken();
+      showLogin('Session expired. Please login again.');
+      return;
+    }
+    showLogin(err.message || 'Authentication check failed');
   }
 }
 
@@ -226,9 +280,10 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('logoutBtn').onclick = () => {
-  sessionStorage.removeItem(tokenKey);
-  location.reload();
+  clearToken();
+  showLogin('');
 };
+
 document.getElementById('createTaskBtn').onclick = createTask;
 document.getElementById('generateBtn').onclick = generate;
 document.getElementById('saveFinalBtn').onclick = saveFinal;
@@ -252,4 +307,4 @@ document.getElementById('loadKnowledge').onclick = () => loadCrud('knowledge', [
 document.getElementById('loadTemplates').onclick = () => loadCrud('templates', ['module', 'language', 'template_type', 'title', 'body', 'is_active']);
 document.getElementById('loadPricing').onclick = () => loadCrud('pricing', ['module', 'service', 'min_price', 'max_price', 'currency', 'notes']);
 
-loadMe();
+bootstrapAuth();

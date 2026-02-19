@@ -43,6 +43,27 @@ async function migrate() {
   const pool = new Pool(buildConnectionConfig());
   const migrationsDir = path.join(__dirname, '..', 'migrations');
 
+function buildConnectionConfig() {
+  if (process.env.DATABASE_URL) {
+    return {
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.PG_SSLMODE === 'require' ? { rejectUnauthorized: false } : undefined
+    };
+  }
+
+  return {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: Number(process.env.DB_PORT || 5432),
+    database: process.env.DB_NAME || 'anagami',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASS || ''
+  };
+}
+
+async function migrate() {
+  const pool = new Pool(buildConnectionConfig());
+  const migrationsDir = path.join(__dirname, '..', 'migrations');
+
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
