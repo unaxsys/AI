@@ -12,17 +12,56 @@
         <div class="brand"><img src="/public/logo.svg" class="logo" alt="Anagami logo" /><span>Anagami AI Core</span></div>
         <div id="userBadge"></div>
       </header>
-      <aside>
-        <button disabled>Email Replies</button>
-        <button disabled>Offers</button>
-        <button disabled>Contracts</button>
-        <button disabled>Support</button>
-        <button disabled>Marketing</button>
-        <button disabled>Recruiting</button>
-        <button class="active">Admin</button>
+      <aside id="adminSidebar">
+        <button data-agent-tab="email" class="active">Email Replies</button>
+        <button data-agent-tab="offers">Offers</button>
+        <button data-agent-tab="contracts">Contracts</button>
+        <button data-agent-tab="support">Support</button>
+        <button data-agent-tab="marketing">Marketing</button>
+        <button data-agent-tab="recruiting">Recruiting</button>
+        <button data-agent-tab="escalations">Escalation Management</button>
+        <button data-agent-tab="sales">Sales</button>
+        <button data-agent-tab="accounting">Accounting Issues</button>
+        <button data-agent-tab="tax">Tax Issues</button>
+        <button data-agent-tab="cases">Cases (NRA/Companies)</button>
+        <button data-agent-tab="procedures">Rules & Procedures</button>
+        <button data-agent-tab="admin">Admin</button>
       </aside>
       <main>
-        <section class="panel">
+        <section id="agentSettingsPanel" class="panel">
+          <h2 id="agentSettingsTitle">Agent настройки</h2>
+          <p>Тук можеш да задаваш настройки и да добавяш информация за всеки агент.</p>
+
+          <form id="agentPromptForm" class="admin-form">
+            <label>Системен промпт
+              <textarea id="agentPromptInput" rows="8" required placeholder="Добави инструкции за избрания агент..."></textarea>
+            </label>
+            <div class="agent-form-actions">
+              <button type="submit">Запази настройки</button>
+            </div>
+          </form>
+
+          <form id="agentKnowledgeForm" class="admin-form">
+            <label>Заглавие на информацията
+              <input id="agentKnowledgeTitle" type="text" required placeholder="Напр. Процедура за ескалация" />
+            </label>
+            <label>Информация / знания
+              <textarea id="agentKnowledgeContent" rows="6" required placeholder="Добави знания, които агентът да използва..."></textarea>
+            </label>
+            <label>Източник (по избор)
+              <input id="agentKnowledgeSource" type="text" placeholder="Документ, URL, вътрешна бележка" />
+            </label>
+            <div class="agent-form-actions">
+              <button type="submit">Добави информация</button>
+            </div>
+          </form>
+
+          <h3>Последна добавена информация</h3>
+          <ul id="agentKnowledgeList" class="agent-knowledge-list"></ul>
+          <div id="agentMessage" class="status-message" aria-live="polite"></div>
+        </section>
+
+        <section id="adminUsersPanel" class="panel hidden">
           <h2>User Management</h2>
           <p>Създай потребител и управлявай достъпа от един екран.</p>
 

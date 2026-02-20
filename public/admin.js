@@ -1,14 +1,36 @@
 let token = sessionStorage.getItem('jwt') || '';
 
 const userBadge = document.getElementById('userBadge');
+const adminSidebar = document.getElementById('adminSidebar');
 const createUserForm = document.getElementById('createUserForm');
 const usersTableBody = document.getElementById('usersTableBody');
 const adminMessage = document.getElementById('adminMessage');
+
+const adminUsersPanel = document.getElementById('adminUsersPanel');
+const agentSettingsPanel = document.getElementById('agentSettingsPanel');
+const agentSettingsTitle = document.getElementById('agentSettingsTitle');
+const agentPromptForm = document.getElementById('agentPromptForm');
+const agentKnowledgeForm = document.getElementById('agentKnowledgeForm');
+const agentPromptInput = document.getElementById('agentPromptInput');
+const agentKnowledgeTitle = document.getElementById('agentKnowledgeTitle');
+const agentKnowledgeContent = document.getElementById('agentKnowledgeContent');
+const agentKnowledgeSource = document.getElementById('agentKnowledgeSource');
+const agentKnowledgeList = document.getElementById('agentKnowledgeList');
+const agentMessage = document.getElementById('agentMessage');
+
+let agents = [];
+let activeAgent = null;
 
 function showMessage(message, isError = false) {
   adminMessage.textContent = message;
   adminMessage.classList.toggle('error', isError);
   adminMessage.classList.toggle('success', !isError);
+}
+
+function showAgentMessage(message, isError = false) {
+  agentMessage.textContent = message;
+  agentMessage.classList.toggle('error', isError);
+  agentMessage.classList.toggle('success', !isError);
 }
 
 function generatePassword(length = 12) {
@@ -54,9 +76,84 @@ function renderUsers(users) {
   });
 }
 
+function renderKnowledge(items = []) {
+  agentKnowledgeList.innerHTML = '';
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.textContent = 'Няма добавена информация за този агент.';
+    agentKnowledgeList.appendChild(li);
+    return;
+  }
+
+  items.slice(0, 5).forEach((item) => {
+    const li = document.createElement('li');
+    const created = formatDate(item.created_at || item.createdAt);
+    li.innerHTML = `<strong>${item.title || '(без заглавие)'}</strong><small>${created}</small>`;
+    agentKnowledgeList.appendChild(li);
+  });
+}
+
 async function loadUsers() {
   const data = await api('/api/admin/users');
   renderUsers(data.users || []);
+}
+
+async function loadAgents() {
+  const data = await api('/api/agents');
+  agents = Array.isArray(data.agents) ? data.agents : [];
+
+  if (!agents.length) {
+    showAgentMessage('Няма активни агенти.', true);
+    return;
+  }
+
+  const buttons = Array.from(adminSidebar.querySelectorAll('button[data-agent-tab]'));
+  buttons.forEach((button) => {
+    const code = button.dataset.agentTab;
+    if (code === 'admin') return;
+    const found = agents.find((agent) => agent.code === code);
+    button.disabled = !found;
+    if (found) button.textContent = found.name;
+  });
+
+  const firstAvailable = agents.find((agent) => !adminSidebar.querySelector(`button[data-agent-tab="${agent.code}"]`)?.disabled);
+  if (firstAvailable) {
+    setSidebarTab(firstAvailable.code);
+    await loadAgentWorkspace(firstAvailable.code);
+  }
+}
+
+async function loadAgentWorkspace(agentCode) {
+  const selected = agents.find((agent) => agent.code === agentCode);
+  if (!selected) {
+    showAgentMessage('Агентът не е наличен.', true);
+    return;
+  }
+
+  activeAgent = selected;
+  agentSettingsTitle.textContent = `${selected.name} · Настройки`;
+
+  const promptsData = await api('/api/admin/prompts');
+  const promptRows = Array.isArray(promptsData.prompts) ? promptsData.prompts : [];
+  const activePrompt = promptRows.find((row) => row.agent_id === selected.id && row.is_active);
+  agentPromptInput.value = activePrompt?.system_prompt_text || '';
+
+  const knowledgeData = await api(`/api/admin/knowledge?agentId=${selected.id}`);
+  renderKnowledge(knowledgeData.docs || []);
+}
+
+function setSidebarTab(tabCode) {
+  adminSidebar.querySelectorAll('button[data-agent-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.agentTab === tabCode);
+  });
+
+  if (tabCode === 'admin') {
+    adminUsersPanel.classList.remove('hidden');
+    agentSettingsPanel.classList.add('hidden');
+  } else {
+    adminUsersPanel.classList.add('hidden');
+    agentSettingsPanel.classList.remove('hidden');
+  }
 }
 
 async function checkAdminAccess() {
@@ -68,7 +165,7 @@ async function checkAdminAccess() {
   try {
     const me = await api('/api/auth/me');
     if (me.role !== 'admin') {
-      showMessage('Достъпът е само за администратори.', true);
+      window.location.href = '/';
       return false;
     }
     userBadge.textContent = `${me.displayName} (${me.role})`;
@@ -78,6 +175,79 @@ async function checkAdminAccess() {
     return false;
   }
 }
+
+adminSidebar.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-agent-tab]');
+  if (!button || button.disabled) return;
+
+  const tabCode = button.dataset.agentTab;
+  setSidebarTab(tabCode);
+
+  if (tabCode !== 'admin') {
+    try {
+      await loadAgentWorkspace(tabCode);
+    } catch (error) {
+      showAgentMessage(error.message, true);
+    }
+  }
+});
+
+agentPromptForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!activeAgent) return;
+
+  const text = agentPromptInput.value.trim();
+  if (!text) {
+    showAgentMessage('Добави системен промпт преди запазване.', true);
+    return;
+  }
+
+  try {
+    await api('/api/admin/prompts', {
+      method: 'POST',
+      body: JSON.stringify({
+        agentId: activeAgent.id,
+        systemPromptText: text,
+        isActive: true
+      })
+    });
+    showAgentMessage('Настройките за агента са запазени.');
+    await loadAgentWorkspace(activeAgent.code);
+  } catch (error) {
+    showAgentMessage(error.message, true);
+  }
+});
+
+agentKnowledgeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!activeAgent) return;
+
+  const title = agentKnowledgeTitle.value.trim();
+  const contentText = agentKnowledgeContent.value.trim();
+  const source = agentKnowledgeSource.value.trim();
+
+  if (!title || !contentText) {
+    showAgentMessage('Попълни заглавие и информация.', true);
+    return;
+  }
+
+  try {
+    await api('/api/admin/knowledge', {
+      method: 'POST',
+      body: JSON.stringify({
+        agentId: activeAgent.id,
+        title,
+        contentText,
+        source
+      })
+    });
+    showAgentMessage('Информацията е добавена успешно.');
+    agentKnowledgeForm.reset();
+    await loadAgentWorkspace(activeAgent.code);
+  } catch (error) {
+    showAgentMessage(error.message, true);
+  }
+});
 
 createUserForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -161,5 +331,11 @@ usersTableBody.addEventListener('click', async (event) => {
 (async () => {
   const allowed = await checkAdminAccess();
   if (!allowed) return;
-  await loadUsers();
+
+  try {
+    await loadUsers();
+    await loadAgents();
+  } catch (error) {
+    showMessage(error.message, true);
+  }
 })();
