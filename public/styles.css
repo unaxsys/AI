@@ -69,41 +69,45 @@ aside button.active { background: var(--accent); }
 }
 
 
-.admin-user-form { grid-template-columns: repeat(3, minmax(180px, 260px)); align-items:end; column-gap:10px; row-gap:10px; max-width:860px; }
-.admin-user-form .field-short { max-width:260px; }
-.admin-user-form .password-inline { min-width:260px; max-width:260px; }
-.inline-field-actions { display:grid; grid-template-columns: 1fr auto auto; gap:6px; align-items:stretch; }
-.inline-field-actions input { width:100%; min-width:0; min-height:38px; }
-.inline-field-actions button { white-space:nowrap; padding:8px 10px; min-height:38px; }
-.admin-user-form > button[type="submit"] { align-self:end; }
+.admin-user-form { display:flex; flex-direction:column; gap:10px; max-width:980px; }
+.admin-user-row { display:grid; gap:10px; }
+.admin-user-row-3 { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
+.admin-user-row-5 { grid-template-columns: repeat(5, minmax(140px, 1fr)); align-items:end; }
+.admin-user-form .field-short { min-width:0; }
+.admin-user-form .password-inline { min-width:0; }
+.admin-user-form input, .admin-user-form select, .admin-user-form button { min-height:38px; }
+.action-button-wrap { display:flex; align-items:flex-end; }
+.action-button-wrap button { width:100%; }
+.admin-user-form > button[type="submit"] { align-self:flex-start; }
+
 .admin-users-table-wrap { margin-top:10px; overflow:auto; }
 .admin-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; }
-.admin-table th, .admin-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; font-size:14px; }
-.admin-table th { position:sticky; top:0; background:var(--panel); z-index:1; }
+.admin-table th, .admin-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; font-size:14px; text-align:left; }
+.admin-table th { position:sticky; top:0; background:var(--panel); z-index:1; font-weight:700; }
 .admin-table td { word-break:break-word; }
-.admin-table th:last-child, .admin-table td:last-child { min-width:240px; }
-.admin-users-table th:nth-child(1), .admin-users-table td:nth-child(1) { width:180px; }
-.admin-users-table th:nth-child(2), .admin-users-table td:nth-child(2) { width:220px; }
-.admin-users-table th:nth-child(3), .admin-users-table td:nth-child(3) { width:90px; }
-.admin-users-table th:nth-child(4), .admin-users-table td:nth-child(4) { width:100px; }
-.admin-users-table th:nth-child(5), .admin-users-table td:nth-child(5) { width:260px; }
 .admin-table td.actions-cell { white-space:nowrap; }
+
+.admin-users-table col.u-name { width:20%; }
+.admin-users-table col.u-email { width:26%; }
+.admin-users-table col.u-role { width:10%; }
+.admin-users-table col.u-status { width:12%; }
+.admin-users-table col.u-actions { width:32%; }
+
 .datetime-cell { display:flex; flex-direction:column; line-height:1.2; }
 .datetime-cell small { opacity:0.75; font-size:12px; }
-.admin-sessions-table th:nth-child(1), .admin-sessions-table td:nth-child(1) { width:130px; }
-.admin-sessions-table th:nth-child(2), .admin-sessions-table td:nth-child(2) { width:210px; }
-.admin-sessions-table th:nth-child(3), .admin-sessions-table td:nth-child(3) { width:210px; }
-.admin-sessions-table th:nth-child(4), .admin-sessions-table td:nth-child(4),
-.admin-sessions-table th:nth-child(5), .admin-sessions-table td:nth-child(5) { width:190px; }
-.admin-sessions-table th:nth-child(6), .admin-sessions-table td:nth-child(6) { width:130px; white-space:nowrap; }
 
-.table-actions { display:flex; gap:6px; flex-wrap:wrap; }
-
+.admin-sessions-table col.s-status { width:12%; }
+.admin-sessions-table col.s-user { width:20%; }
+.admin-sessions-table col.s-email { width:20%; }
+.admin-sessions-table col.s-login { width:16%; }
+.admin-sessions-table col.s-seen { width:16%; }
+.admin-sessions-table col.s-duration { width:16%; }
+.admin-sessions-table td:last-child { white-space:nowrap; }
+.table-actions { display:flex; gap:5px; flex-wrap:wrap; }
 .admin-table tbody tr:nth-child(even) { background: color-mix(in oklab, var(--panel), #8aa0c8 8%); }
 .admin-table tbody tr:hover { background: color-mix(in oklab, var(--panel), var(--accent) 10%); }
 .btn-secondary { background:#5f74a3; }
 .btn-compact { padding:6px 9px; font-size:12px; line-height:1.1; }
-.table-actions { gap:5px; }
 
 .table-actions button { padding:6px 10px; font-size:12px; }
 .btn-danger { background:#d9534f; }
@@ -116,8 +120,9 @@ aside button.active { background: var(--accent); }
 .status-dot.offline { background:#d9534f; }
 
 @media (max-width: 1200px) {
-  .admin-user-form { grid-template-columns: repeat(2, minmax(180px, 1fr)); max-width:none; }
-  .admin-user-form .password-inline { min-width:0; max-width:none; }
+  .admin-user-form { max-width:none; }
+  .admin-user-row-3 { grid-template-columns: 1fr; }
+  .admin-user-row-5 { grid-template-columns: 1fr 1fr; }
 }
 
 .theme-toggle {

@@ -130,35 +130,48 @@
           <div id="adminUsersTab" class="admin-tab-pane">
             <h4>Създаване на потребител</h4>
             <form id="adminCreateUserForm" class="admin-form admin-user-form">
-              <label class="field-short">Email<input name="email" type="email" required /></label>
-              <label class="field-short">Име<input name="firstName" required /></label>
-              <label class="field-short">Фамилия<input name="lastName" required /></label>
-              <label class="field-short">Пол
-                <select name="gender">
-                  <option value="male">male</option>
-                  <option value="female">female</option>
-                  <option value="other">other</option>
-                </select>
-              </label>
-              <label class="field-short">Роля
-                <select name="role">
-                  <option value="user">user</option>
-                  <option value="manager">manager</option>
-                  <option value="admin">admin</option>
-                </select>
-              </label>
-              <label class="password-inline">Парола
-                <div class="inline-field-actions">
+              <div class="admin-user-row admin-user-row-3">
+                <label class="field-short">Email<input name="email" type="email" required /></label>
+                <label class="field-short">Име<input name="firstName" required /></label>
+                <label class="field-short">Фамилия<input name="lastName" required /></label>
+              </div>
+              <div class="admin-user-row admin-user-row-5">
+                <label class="field-short">Пол
+                  <select name="gender">
+                    <option value="male">male</option>
+                    <option value="female">female</option>
+                    <option value="other">other</option>
+                  </select>
+                </label>
+                <label class="field-short">Роля
+                  <select name="role">
+                    <option value="user">user</option>
+                    <option value="manager">manager</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+                <label class="field-short password-inline">Парола
                   <input name="password" id="adminGeneratedPassword" placeholder="Генерирай или въведи" />
+                </label>
+                <div class="action-button-wrap">
                   <button type="button" id="generatePasswordBtn">Генерирай</button>
+                </div>
+                <div class="action-button-wrap">
                   <button type="button" id="copyPasswordBtn">Копирай</button>
                 </div>
-              </label>
+              </div>
               <button type="submit">Създай потребител</button>
             </form>
             <p id="adminUserStatus" class="status-message"></p>
             <div class="admin-users-table-wrap">
               <table class="admin-table admin-users-table" id="adminUsersTable">
+                <colgroup>
+                  <col class="u-name" />
+                  <col class="u-email" />
+                  <col class="u-role" />
+                  <col class="u-status" />
+                  <col class="u-actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Име</th>
@@ -181,6 +194,14 @@
             </div>
             <div class="admin-users-table-wrap">
               <table class="admin-table admin-sessions-table" id="adminSessionsTable">
+                <colgroup>
+                  <col class="s-status" />
+                  <col class="s-user" />
+                  <col class="s-email" />
+                  <col class="s-login" />
+                  <col class="s-seen" />
+                  <col class="s-duration" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Статус</th>
