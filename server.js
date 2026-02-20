@@ -81,14 +81,100 @@ async function runMigrations() {
   await pool.query("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'manager'");
 }
 
-async function getActivePrompt(agentId) {
-  const { rows } = await pool.query('SELECT system_prompt_text FROM agent_prompt_versions WHERE agent_id=$1 AND is_active=true ORDER BY version_no DESC LIMIT 1', [agentId]);
-  return rows[0]?.system_prompt_text || 'You are a practical business assistant. Return concise Bulgarian text with section labels.';
+const SAFE_DEFAULT_PROMPT = 'You are a practical business assistant. Return concise Bulgarian text with section labels and clear structure.';
+
+function badRequest(res, message) {
+  return res.status(400).json({ ok: false, message });
 }
 
-async function buildKnowledge(agentId) {
-  const { rows } = await pool.query('SELECT title, content_text FROM knowledge_documents WHERE agent_id=$1 ORDER BY id DESC LIMIT 5', [agentId]);
-  return rows.map((r) => `# ${r.title}\n${r.content_text}`).join('\n\n');
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags.map((t) => String(t).trim()).filter(Boolean);
+  if (typeof tags === 'string') return tags.split(',').map((t) => t.trim()).filter(Boolean);
+  return [];
+}
+
+function validateTextField(value, fieldName, maxLen) {
+  const text = String(value || '').trim();
+  if (!text) return { ok: false, message: `${fieldName} is required` };
+  if (text.length > maxLen) return { ok: false, message: `${fieldName} exceeds ${maxLen} characters` };
+  return { ok: true, value: text };
+}
+
+async function writeAgentAudit(agentId, userId, action, payload = {}) {
+  await pool.query(
+    'INSERT INTO agent_audit(agent_id,user_id,action,payload) VALUES($1,$2,$3,$4)',
+    [agentId, userId || null, action, payload || {}]
+  );
+}
+
+async function resolveAgentByKey(agentKey) {
+  const key = String(agentKey || '').trim();
+  if (!key) return null;
+  const { rows } = await pool.query('SELECT * FROM agents WHERE key=$1 OR code=$1 LIMIT 1', [key]);
+  return rows[0] || null;
+}
+
+async function loadAgentContext(agentKey) {
+  const agent = await resolveAgentByKey(agentKey);
+  if (!agent) throw new Error('Agent not found');
+
+  const [promptsResult, settingsResult, knowledgeResult, examplesResult] = await Promise.all([
+    pool.query(
+      `SELECT id,type,content,version,is_active
+       FROM agent_prompts
+       WHERE agent_id=$1 AND is_active=true
+       ORDER BY version DESC, created_at DESC`,
+      [agent.id]
+    ),
+    pool.query('SELECT * FROM agent_settings WHERE agent_id=$1', [agent.id]),
+    pool.query('SELECT id,title,content,source,tags FROM agent_knowledge WHERE agent_id=$1 AND is_active=true ORDER BY created_at DESC LIMIT 20', [agent.id]),
+    pool.query(`SELECT id,input_text,output_text,rating,notes,created_at
+                FROM agent_training_examples
+                WHERE agent_id=$1 AND status='approved'
+                ORDER BY created_at DESC
+                LIMIT 5`, [agent.id])
+  ]);
+
+  const prompts = promptsResult.rows;
+  const systemPrompt = prompts.find((p) => p.type === 'system')?.content || SAFE_DEFAULT_PROMPT;
+  const stylePrompt = prompts.find((p) => p.type === 'style')?.content || '';
+  const rulesPrompt = prompts.find((p) => p.type === 'rules')?.content || '';
+
+  return {
+    agent,
+    systemPrompt,
+    stylePrompt,
+    rulesPrompt,
+    knowledgeItems: knowledgeResult.rows,
+    examples: examplesResult.rows,
+    settings: settingsResult.rows[0] || {
+      model: 'gpt-4.1-mini',
+      temperature: 0.3,
+      max_tokens: 800,
+      tools_enabled: {}
+    },
+    activePromptMeta: prompts.map((p) => ({ id: p.id, type: p.type, version: p.version }))
+  };
+}
+
+function formatContextForUser(context, inputText) {
+  const knowledge = context.knowledgeItems.length
+    ? context.knowledgeItems.map((row) => `- ${row.title}: ${row.content}`).join('\n')
+    : '- Няма добавени знания.';
+  const examples = context.examples.length
+    ? context.examples.map((row, index) => `${index + 1}) Input: ${row.input_text}\nOutput: ${row.output_text}`).join('\n\n')
+    : 'Няма одобрени примери.';
+
+  return [
+    'Вход от потребител:',
+    inputText,
+    '',
+    'Контекстни знания:',
+    knowledge,
+    '',
+    'Одобрени примери:',
+    examples
+  ].join('\n');
 }
 
 async function getActivePriceList() {
@@ -320,11 +406,23 @@ app.get('/api/agents', auth, requirePasswordUpdated, async (_req, res) => {
 });
 
 app.post('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
-  const { agentId, inputText } = req.body;
-  const text = String(inputText || '').trim();
-  if (!text || text.length > 8000) return res.status(400).json({ error: 'Invalid input' });
-  const r = await pool.query('INSERT INTO tasks(agent_id, created_by, input_text, status) VALUES ($1,$2,$3,$4) RETURNING *', [agentId, req.user.id, text, 'draft']);
-  res.status(201).json(r.rows[0]);
+  try {
+    const text = String(req.body.inputText || '').trim();
+    if (!text || text.length > 8000) return res.status(400).json({ ok: false, message: 'Invalid input text' });
+
+    let agentId = req.body.agentId ? Number(req.body.agentId) : null;
+    const agentKey = String(req.body.agent_key || req.body.agentKey || '').trim();
+    if (!agentId && agentKey) {
+      const resolved = await resolveAgentByKey(agentKey);
+      agentId = resolved?.id || null;
+    }
+    if (!agentId) return res.status(400).json({ ok: false, message: 'agentId or agent_key is required' });
+
+    const r = await pool.query('INSERT INTO tasks(agent_id, created_by, input_text, status) VALUES ($1,$2,$3,$4) RETURNING *', [agentId, req.user.id, text, 'draft']);
+    return res.status(201).json({ ok: true, ...r.rows[0], task: r.rows[0] });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to create task' });
+  }
 });
 
 app.get('/api/tasks', auth, requirePasswordUpdated, async (req, res) => {
@@ -347,38 +445,43 @@ app.get('/api/tasks/:id', auth, requirePasswordUpdated, async (req, res) => {
 });
 
 app.post('/api/tasks/:id/generate', auth, requirePasswordUpdated, async (req, res) => {
-  const taskId = req.params.id;
-  const t = await pool.query('SELECT t.*, a.code FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=$1 AND t.created_by=$2', [taskId, req.user.id]);
-  const task = t.rows[0];
-  if (!task) return res.status(404).json({ error: 'Not found' });
+  try {
+    const taskId = req.params.id;
+    const t = await pool.query('SELECT t.*, a.code, a.key FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=$1 AND t.created_by=$2', [taskId, req.user.id]);
+    const task = t.rows[0];
+    if (!task) return res.status(404).json({ ok: false, message: 'Task not found' });
 
-  const prompt = await getActivePrompt(task.agent_id);
-  const knowledge = await buildKnowledge(task.agent_id);
-  const sectionTypes = sectionsForAgent(task.code);
-  const instructions = `Return plain text. Use lines starting with exact labels: ${sectionTypes.map((s) => `${s}:`).join(', ')}.`;
+    const context = await loadAgentContext(task.key || task.code);
+    const sectionTypes = sectionsForAgent(task.code);
+    const instructions = `Return plain text. Use lines starting with exact labels: ${sectionTypes.map((s) => `${s}:`).join(', ')}.`;
+    const systemPrompt = [context.systemPrompt, context.rulesPrompt, context.stylePrompt].filter(Boolean).join('\n\n');
 
-  const result = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-    temperature: 0.3,
-    messages: [
-      { role: 'system', content: `${prompt}\n\nKnowledge:\n${knowledge || 'No knowledge configured.'}` },
-      { role: 'user', content: `${instructions}\n\nInput:\n${task.input_text}` }
-    ]
-  });
+    const result = await openai.chat.completions.create({
+      model: context.settings.model || process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+      temperature: Number(context.settings.temperature ?? 0.3),
+      max_tokens: Number(context.settings.max_tokens ?? 800),
+      messages: [
+        { role: 'system', content: systemPrompt || SAFE_DEFAULT_PROMPT },
+        { role: 'user', content: `${instructions}\n\n${formatContextForUser(context, task.input_text)}` }
+      ]
+    });
 
-  const text = result.choices?.[0]?.message?.content || '';
-  const parsed = parseLabeledSections(text, sectionTypes);
-  for (const s of sectionTypes) {
-    await pool.query(
-      `INSERT INTO task_sections(task_id, section_type, content_draft, updated_at)
-       VALUES ($1,$2,$3,now())
-       ON CONFLICT(task_id, section_type) DO UPDATE SET content_draft=EXCLUDED.content_draft, updated_at=now()`,
-      [taskId, s, parsed[s]?.trim() || '']
-    );
+    const text = result.choices?.[0]?.message?.content || '';
+    const parsed = parseLabeledSections(text, sectionTypes);
+    for (const s of sectionTypes) {
+      await pool.query(
+        `INSERT INTO task_sections(task_id, section_type, content_draft, updated_at)
+         VALUES ($1,$2,$3,now())
+         ON CONFLICT(task_id, section_type) DO UPDATE SET content_draft=EXCLUDED.content_draft, updated_at=now()`,
+        [taskId, s, parsed[s]?.trim() || '']
+      );
+    }
+    await pool.query('UPDATE tasks SET updated_at=now(), status=$2 WHERE id=$1', [taskId, 'reviewed']);
+    const sections = await pool.query('SELECT * FROM task_sections WHERE task_id=$1 ORDER BY id', [taskId]);
+    return res.json({ ok: true, sections: sections.rows });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Generation failed' });
   }
-  await pool.query('UPDATE tasks SET updated_at=now(), status=$2 WHERE id=$1', [taskId, 'reviewed']);
-  const sections = await pool.query('SELECT * FROM task_sections WHERE task_id=$1 ORDER BY id', [taskId]);
-  res.json({ sections: sections.rows });
 });
 
 app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, res) => {
@@ -391,8 +494,36 @@ app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, r
 });
 
 app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res) => {
-  await pool.query('UPDATE tasks SET status=$2, approved_by=$3, approved_at=now(), updated_at=now() WHERE id=$1 AND created_by=$3', [req.params.id, 'approved', req.user.id]);
-  res.json({ ok: true });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const taskResult = await client.query(
+      'SELECT t.*, a.id AS agent_id FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=$1 AND t.created_by=$2',
+      [req.params.id, req.user.id]
+    );
+    const task = taskResult.rows[0];
+    if (!task) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, message: 'Task not found' });
+    }
+
+    await client.query('UPDATE tasks SET status=$2, approved_by=$3, approved_at=now(), updated_at=now() WHERE id=$1', [req.params.id, 'approved', req.user.id]);
+    const sections = await client.query(`SELECT section_type, COALESCE(content_final, content_draft, '') AS content FROM task_sections WHERE task_id=$1 ORDER BY id`, [req.params.id]);
+    const outputText = sections.rows.map((row) => `${row.section_type}: ${row.content}`).join('\n\n').trim() || 'Approved output';
+    await client.query(
+      `INSERT INTO agent_training_examples(agent_id,input_text,output_text,status,notes)
+       VALUES($1,$2,$3,'approved',$4)`,
+      [task.agent_id, task.input_text, outputText, `Auto-approved from task #${req.params.id}`]
+    );
+    await writeAgentAudit(task.agent_id, req.user.id, 'approve_task_training', { taskId: req.params.id });
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ ok: false, message: error.message || 'Approve failed' });
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
@@ -549,33 +680,422 @@ app.delete('/api/admin/users/:id', auth, requirePasswordUpdated, adminOnly, asyn
   return res.json({ ok: true });
 });
 
+app.get('/api/admin/agents', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id, key, code, name, description, is_enabled, created_at FROM agents ORDER BY created_at ASC, id ASC');
+    return res.json({ ok: true, agents: rows });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to load agents' });
+  }
+});
+
+app.post('/api/admin/agents', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  try {
+    const keyValidation = validateTextField(req.body.key, 'key', 120);
+    const nameValidation = validateTextField(req.body.name, 'name', 200);
+    if (!keyValidation.ok) return badRequest(res, keyValidation.message);
+    if (!nameValidation.ok) return badRequest(res, nameValidation.message);
+    const key = keyValidation.value.toLowerCase().replace(/\s+/g, '_');
+    const description = String(req.body.description || '').trim().slice(0, 2000);
+    const isEnabled = req.body.is_enabled === undefined ? true : Boolean(req.body.is_enabled);
+    const { rows } = await pool.query(
+      `INSERT INTO agents(code,key,name,description,is_enabled)
+       VALUES($1,$2,$3,$4,$5)
+       RETURNING id,key,code,name,description,is_enabled,created_at`,
+      [key, key, nameValidation.value, description, isEnabled]
+    );
+    await pool.query('INSERT INTO agent_settings(agent_id) VALUES($1) ON CONFLICT (agent_id) DO NOTHING', [rows[0].id]);
+    await writeAgentAudit(rows[0].id, req.user.id, 'create_agent', { key, name: nameValidation.value });
+    return res.status(201).json({ ok: true, agent: rows[0] });
+  } catch (error) {
+    return res.status(400).json({ ok: false, message: error.message || 'Failed to create agent' });
+  }
+});
+
+app.put('/api/admin/agents/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return badRequest(res, 'Invalid agent id');
+    const current = await pool.query('SELECT * FROM agents WHERE id=$1', [id]);
+    if (!current.rows[0]) return res.status(404).json({ ok: false, message: 'Agent not found' });
+    const payload = {
+      name: req.body.name === undefined ? current.rows[0].name : String(req.body.name || '').trim(),
+      description: req.body.description === undefined ? current.rows[0].description : String(req.body.description || '').trim(),
+      is_enabled: req.body.is_enabled === undefined ? current.rows[0].is_enabled : Boolean(req.body.is_enabled)
+    };
+    if (!payload.name) return badRequest(res, 'name is required');
+    const { rows } = await pool.query(
+      'UPDATE agents SET name=$1, description=$2, is_enabled=$3 WHERE id=$4 RETURNING id,key,code,name,description,is_enabled,created_at',
+      [payload.name, payload.description, payload.is_enabled, id]
+    );
+    await writeAgentAudit(id, req.user.id, 'update_agent', payload);
+    return res.json({ ok: true, agent: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to update agent' });
+  }
+});
+
+app.get('/api/admin/agents/:id/settings', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const { rows } = await pool.query('SELECT * FROM agent_settings WHERE agent_id=$1', [id]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Settings not found' });
+  return res.json({ ok: true, settings: rows[0] });
+});
+
+app.put('/api/admin/agents/:id/settings', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return badRequest(res, 'Invalid agent id');
+    const model = String(req.body.model || 'gpt-4.1-mini').trim().slice(0, 120);
+    const temperature = Number(req.body.temperature ?? 0.3);
+    const maxTokens = Number(req.body.max_tokens ?? req.body.maxTokens ?? 800);
+    const toolsEnabled = req.body.tools_enabled && typeof req.body.tools_enabled === 'object' ? req.body.tools_enabled : {};
+    if (!model) return badRequest(res, 'model is required');
+    if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) return badRequest(res, 'temperature must be between 0 and 2');
+    if (!Number.isInteger(maxTokens) || maxTokens < 64 || maxTokens > 8000) return badRequest(res, 'max_tokens must be between 64 and 8000');
+
+    const { rows } = await pool.query(
+      `INSERT INTO agent_settings(agent_id,model,temperature,max_tokens,tools_enabled,updated_at)
+       VALUES($1,$2,$3,$4,$5,now())
+       ON CONFLICT (agent_id)
+       DO UPDATE SET model=EXCLUDED.model,temperature=EXCLUDED.temperature,max_tokens=EXCLUDED.max_tokens,tools_enabled=EXCLUDED.tools_enabled,updated_at=now()
+       RETURNING *`,
+      [id, model, temperature, maxTokens, toolsEnabled]
+    );
+    await writeAgentAudit(id, req.user.id, 'update_settings', { model, temperature, maxTokens });
+    return res.json({ ok: true, settings: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to update settings' });
+  }
+});
+
+app.get('/api/admin/agents/:id/prompts', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const type = String(req.query.type || '').trim();
+  if (!id) return badRequest(res, 'Invalid agent id');
+  if (type && !['system', 'style', 'rules'].includes(type)) return badRequest(res, 'Invalid prompt type');
+  const params = [id];
+  let sql = 'SELECT * FROM agent_prompts WHERE agent_id=$1';
+  if (type) {
+    params.push(type);
+    sql += ` AND type=$${params.length}`;
+  }
+  sql += ' ORDER BY type ASC, version DESC, created_at DESC';
+  const { rows } = await pool.query(sql, params);
+  return res.json({ ok: true, prompts: rows });
+});
+
+app.post('/api/admin/agents/:id/prompts', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return badRequest(res, 'Invalid agent id');
+    const type = String(req.body.type || '').trim();
+    if (!['system', 'style', 'rules'].includes(type)) return badRequest(res, 'Invalid prompt type');
+    const contentValidation = validateTextField(req.body.content, 'content', 20000);
+    if (!contentValidation.ok) return badRequest(res, contentValidation.message);
+    const versionRes = await pool.query('SELECT COALESCE(MAX(version),0)+1 AS next_version FROM agent_prompts WHERE agent_id=$1 AND type=$2', [id, type]);
+    const { rows } = await pool.query(
+      `INSERT INTO agent_prompts(agent_id,type,content,version,is_active)
+       VALUES($1,$2,$3,$4,false)
+       RETURNING *`,
+      [id, type, contentValidation.value, versionRes.rows[0].next_version]
+    );
+    await writeAgentAudit(id, req.user.id, 'create_prompt', { promptId: rows[0].id, type, version: rows[0].version });
+    return res.status(201).json({ ok: true, prompt: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to create prompt' });
+  }
+});
+
+app.put('/api/admin/prompts/:promptId', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const promptId = Number(req.params.promptId);
+  if (!promptId) return badRequest(res, 'Invalid prompt id');
+  const contentValidation = validateTextField(req.body.content, 'content', 20000);
+  if (!contentValidation.ok) return badRequest(res, contentValidation.message);
+  const { rows } = await pool.query('UPDATE agent_prompts SET content=$1 WHERE id=$2 RETURNING *', [contentValidation.value, promptId]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Prompt not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'update_prompt', { promptId });
+  return res.json({ ok: true, prompt: rows[0] });
+});
+
+app.post('/api/admin/prompts/:promptId/activate', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const promptId = Number(req.params.promptId);
+  if (!promptId) return badRequest(res, 'Invalid prompt id');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await client.query('SELECT * FROM agent_prompts WHERE id=$1', [promptId]);
+    const prompt = current.rows[0];
+    if (!prompt) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, message: 'Prompt not found' });
+    }
+    await client.query('UPDATE agent_prompts SET is_active=false WHERE agent_id=$1 AND type=$2', [prompt.agent_id, prompt.type]);
+    await client.query('UPDATE agent_prompts SET is_active=true WHERE id=$1', [promptId]);
+    await writeAgentAudit(prompt.agent_id, req.user.id, 'activate_prompt', { promptId });
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ ok: false, message: error.message || 'Failed to activate prompt' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/admin/agents/:id/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const { rows } = await pool.query('SELECT * FROM agent_knowledge WHERE agent_id=$1 ORDER BY created_at DESC', [id]);
+  return res.json({ ok: true, knowledge: rows });
+});
+
+app.post('/api/admin/agents/:id/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const titleValidation = validateTextField(req.body.title, 'title', 300);
+  const contentValidation = validateTextField(req.body.content, 'content', 50000);
+  if (!titleValidation.ok) return badRequest(res, titleValidation.message);
+  if (!contentValidation.ok) return badRequest(res, contentValidation.message);
+  const source = String(req.body.source || '').trim().slice(0, 200);
+  const tags = normalizeTags(req.body.tags);
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  const { rows } = await pool.query(
+    `INSERT INTO agent_knowledge(agent_id,title,content,source,tags,is_active)
+     VALUES($1,$2,$3,$4,$5,$6)
+     RETURNING *`,
+    [id, titleValidation.value, contentValidation.value, source, JSON.stringify(tags), isActive]
+  );
+  await writeAgentAudit(id, req.user.id, 'create_knowledge', { knowledgeId: rows[0].id });
+  return res.status(201).json({ ok: true, knowledge: rows[0] });
+});
+
+app.put('/api/admin/knowledge/:kid', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const kid = Number(req.params.kid);
+  if (!kid) return badRequest(res, 'Invalid knowledge id');
+  const current = await pool.query('SELECT * FROM agent_knowledge WHERE id=$1', [kid]);
+  const row = current.rows[0];
+  if (!row) return res.status(404).json({ ok: false, message: 'Knowledge not found' });
+  const payload = {
+    title: req.body.title === undefined ? row.title : String(req.body.title || '').trim(),
+    content: req.body.content === undefined ? row.content : String(req.body.content || '').trim(),
+    source: req.body.source === undefined ? row.source : String(req.body.source || '').trim(),
+    tags: req.body.tags === undefined ? row.tags : normalizeTags(req.body.tags),
+    is_active: req.body.is_active === undefined ? row.is_active : Boolean(req.body.is_active)
+  };
+  if (!payload.title) return badRequest(res, 'title is required');
+  if (!payload.content) return badRequest(res, 'content is required');
+  if (payload.content.length > 50000) return badRequest(res, 'content exceeds 50000 characters');
+  const { rows } = await pool.query(
+    `UPDATE agent_knowledge
+     SET title=$1, content=$2, source=$3, tags=$4, is_active=$5
+     WHERE id=$6 RETURNING *`,
+    [payload.title, payload.content, payload.source, JSON.stringify(payload.tags), payload.is_active, kid]
+  );
+  await writeAgentAudit(row.agent_id, req.user.id, 'update_knowledge', { knowledgeId: kid });
+  return res.json({ ok: true, knowledge: rows[0] });
+});
+
+app.delete('/api/admin/knowledge/:kid', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const kid = Number(req.params.kid);
+  if (!kid) return badRequest(res, 'Invalid knowledge id');
+  const { rows } = await pool.query('DELETE FROM agent_knowledge WHERE id=$1 RETURNING *', [kid]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Knowledge not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'delete_knowledge', { knowledgeId: kid });
+  return res.json({ ok: true });
+});
+
+app.get('/api/admin/agents/:id/templates', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const { rows } = await pool.query('SELECT * FROM agent_templates WHERE agent_id=$1 ORDER BY created_at DESC', [id]);
+  return res.json({ ok: true, templates: rows });
+});
+
+app.post('/api/admin/agents/:id/templates', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const nameValidation = validateTextField(req.body.name, 'name', 300);
+  const contentValidation = validateTextField(req.body.content, 'content', 50000);
+  if (!nameValidation.ok) return badRequest(res, nameValidation.message);
+  if (!contentValidation.ok) return badRequest(res, contentValidation.message);
+  const tags = normalizeTags(req.body.tags);
+  const isActive = req.body.is_active === undefined ? true : Boolean(req.body.is_active);
+  const { rows } = await pool.query(
+    `INSERT INTO agent_templates(agent_id,name,content,tags,is_active)
+     VALUES($1,$2,$3,$4,$5)
+     RETURNING *`,
+    [id, nameValidation.value, contentValidation.value, JSON.stringify(tags), isActive]
+  );
+  await writeAgentAudit(id, req.user.id, 'create_template', { templateId: rows[0].id });
+  return res.status(201).json({ ok: true, template: rows[0] });
+});
+
+app.put('/api/admin/templates/:tid', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const tid = Number(req.params.tid);
+  if (!tid) return badRequest(res, 'Invalid template id');
+  const current = await pool.query('SELECT * FROM agent_templates WHERE id=$1', [tid]);
+  const row = current.rows[0];
+  if (!row) return res.status(404).json({ ok: false, message: 'Template not found' });
+  const payload = {
+    name: req.body.name === undefined ? row.name : String(req.body.name || '').trim(),
+    content: req.body.content === undefined ? row.content : String(req.body.content || '').trim(),
+    tags: req.body.tags === undefined ? row.tags : normalizeTags(req.body.tags),
+    is_active: req.body.is_active === undefined ? row.is_active : Boolean(req.body.is_active)
+  };
+  if (!payload.name) return badRequest(res, 'name is required');
+  if (!payload.content) return badRequest(res, 'content is required');
+  const { rows } = await pool.query(
+    `UPDATE agent_templates
+     SET name=$1, content=$2, tags=$3, is_active=$4
+     WHERE id=$5 RETURNING *`,
+    [payload.name, payload.content, JSON.stringify(payload.tags), payload.is_active, tid]
+  );
+  await writeAgentAudit(row.agent_id, req.user.id, 'update_template', { templateId: tid });
+  return res.json({ ok: true, template: rows[0] });
+});
+
+app.delete('/api/admin/templates/:tid', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const tid = Number(req.params.tid);
+  if (!tid) return badRequest(res, 'Invalid template id');
+  const { rows } = await pool.query('DELETE FROM agent_templates WHERE id=$1 RETURNING *', [tid]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Template not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'delete_template', { templateId: tid });
+  return res.json({ ok: true });
+});
+
+app.get('/api/admin/agents/:id/examples', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const { rows } = await pool.query('SELECT * FROM agent_training_examples WHERE agent_id=$1 ORDER BY created_at DESC', [id]);
+  return res.json({ ok: true, examples: rows });
+});
+
+app.post('/api/admin/agents/:id/examples', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const inputValidation = validateTextField(req.body.input_text, 'input_text', 20000);
+  const outputValidation = validateTextField(req.body.output_text, 'output_text', 20000);
+  if (!inputValidation.ok) return badRequest(res, inputValidation.message);
+  if (!outputValidation.ok) return badRequest(res, outputValidation.message);
+  const status = ['draft', 'approved', 'rejected'].includes(String(req.body.status || 'draft')) ? String(req.body.status || 'draft') : 'draft';
+  const rating = req.body.rating == null ? null : Number(req.body.rating);
+  if (rating != null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) return badRequest(res, 'rating must be between 1 and 5');
+  const notes = String(req.body.notes || '').trim().slice(0, 3000);
+  const { rows } = await pool.query(
+    `INSERT INTO agent_training_examples(agent_id,input_text,output_text,status,rating,notes)
+     VALUES($1,$2,$3,$4,$5,$6)
+     RETURNING *`,
+    [id, inputValidation.value, outputValidation.value, status, rating, notes]
+  );
+  await writeAgentAudit(id, req.user.id, 'create_example', { exampleId: rows[0].id, status });
+  return res.status(201).json({ ok: true, example: rows[0] });
+});
+
+app.put('/api/admin/examples/:eid', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const eid = Number(req.params.eid);
+  if (!eid) return badRequest(res, 'Invalid example id');
+  const current = await pool.query('SELECT * FROM agent_training_examples WHERE id=$1', [eid]);
+  const row = current.rows[0];
+  if (!row) return res.status(404).json({ ok: false, message: 'Example not found' });
+  const payload = {
+    input_text: req.body.input_text === undefined ? row.input_text : String(req.body.input_text || '').trim(),
+    output_text: req.body.output_text === undefined ? row.output_text : String(req.body.output_text || '').trim(),
+    status: req.body.status === undefined ? row.status : String(req.body.status || '').trim(),
+    rating: req.body.rating === undefined ? row.rating : (req.body.rating == null ? null : Number(req.body.rating)),
+    notes: req.body.notes === undefined ? row.notes : String(req.body.notes || '').trim()
+  };
+  if (!payload.input_text || !payload.output_text) return badRequest(res, 'input_text and output_text are required');
+  if (!['draft', 'approved', 'rejected'].includes(payload.status)) return badRequest(res, 'Invalid status');
+  if (payload.rating != null && (!Number.isInteger(payload.rating) || payload.rating < 1 || payload.rating > 5)) return badRequest(res, 'rating must be between 1 and 5');
+  const { rows } = await pool.query(
+    `UPDATE agent_training_examples
+     SET input_text=$1, output_text=$2, status=$3, rating=$4, notes=$5
+     WHERE id=$6 RETURNING *`,
+    [payload.input_text, payload.output_text, payload.status, payload.rating, payload.notes, eid]
+  );
+  await writeAgentAudit(row.agent_id, req.user.id, 'update_example', { exampleId: eid, status: payload.status });
+  return res.json({ ok: true, example: rows[0] });
+});
+
+app.post('/api/admin/examples/:eid/approve', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const eid = Number(req.params.eid);
+  if (!eid) return badRequest(res, 'Invalid example id');
+  const { rows } = await pool.query("UPDATE agent_training_examples SET status='approved' WHERE id=$1 RETURNING *", [eid]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Example not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'approve_example', { exampleId: eid });
+  return res.json({ ok: true, example: rows[0] });
+});
+
+app.post('/api/admin/examples/:eid/reject', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const eid = Number(req.params.eid);
+  if (!eid) return badRequest(res, 'Invalid example id');
+  const { rows } = await pool.query("UPDATE agent_training_examples SET status='rejected' WHERE id=$1 RETURNING *", [eid]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Example not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'reject_example', { exampleId: eid });
+  return res.json({ ok: true, example: rows[0] });
+});
+
+app.get('/api/admin/agents/:id/audit', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const { rows } = await pool.query('SELECT * FROM agent_audit WHERE agent_id=$1 ORDER BY created_at DESC LIMIT 200', [id]);
+  return res.json({ ok: true, audit: rows });
+});
+
+app.get('/api/admin/agents/:id/debug-context', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid agent id');
+  const agentResult = await pool.query('SELECT key, code FROM agents WHERE id=$1', [id]);
+  if (!agentResult.rows[0]) return res.status(404).json({ ok: false, message: 'Agent not found' });
+  const context = await loadAgentContext(agentResult.rows[0].key || agentResult.rows[0].code);
+  return res.json({
+    ok: true,
+    activePrompts: context.activePromptMeta,
+    settings: context.settings,
+    knowledgeCount: context.knowledgeItems.length,
+    approvedExamplesCount: context.examples.length
+  });
+});
+
+// backwards-compatible legacy endpoints
 app.get('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
-  const { rows } = await pool.query('SELECT apv.*, a.code agent_code FROM agent_prompt_versions apv JOIN agents a ON a.id=apv.agent_id ORDER BY apv.created_at DESC LIMIT 200');
-  res.json(rows);
+  const { rows } = await pool.query('SELECT ap.*, a.code agent_code, a.key agent_key FROM agent_prompts ap JOIN agents a ON a.id=ap.agent_id ORDER BY ap.created_at DESC LIMIT 300');
+  return res.json(rows);
 });
 
 app.post('/api/admin/prompts', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const v = await pool.query('SELECT COALESCE(MAX(version_no),0)+1 n FROM agent_prompt_versions WHERE agent_id=$1', [req.body.agentId]);
-  if (req.body.isActive) await pool.query('UPDATE agent_prompt_versions SET is_active=false WHERE agent_id=$1', [req.body.agentId]);
-  const { rows } = await pool.query('INSERT INTO agent_prompt_versions(agent_id,version_no,system_prompt_text,is_active) VALUES ($1,$2,$3,$4) RETURNING *', [req.body.agentId, v.rows[0].n, req.body.systemPromptText, Boolean(req.body.isActive)]);
-  res.status(201).json(rows[0]);
+  const agentId = Number(req.body.agentId);
+  if (!agentId) return badRequest(res, 'agentId is required');
+  const content = req.body.systemPromptText || req.body.content;
+  req.params.id = String(agentId);
+  req.body.type = 'system';
+  req.body.content = content;
+  const nextVersion = await pool.query('SELECT COALESCE(MAX(version),0)+1 n FROM agent_prompts WHERE agent_id=$1 AND type=$2', [agentId, 'system']);
+  if (req.body.isActive) await pool.query('UPDATE agent_prompts SET is_active=false WHERE agent_id=$1 AND type=$2', [agentId, 'system']);
+  const { rows } = await pool.query('INSERT INTO agent_prompts(agent_id,type,content,is_active,version) VALUES($1,$2,$3,$4,$5) RETURNING *', [agentId, 'system', String(content || '').trim(), Boolean(req.body.isActive), nextVersion.rows[0].n]);
+  await writeAgentAudit(agentId, req.user.id, 'legacy_create_prompt', { promptId: rows[0].id });
+  return res.status(201).json(rows[0]);
 });
 
 app.get('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM knowledge_documents WHERE agent_id=$1 ORDER BY created_at DESC', [req.query.agentId]);
-  res.json(rows);
+  const agentId = Number(req.query.agentId);
+  if (!agentId) return badRequest(res, 'agentId is required');
+  const { rows } = await pool.query('SELECT * FROM agent_knowledge WHERE agent_id=$1 ORDER BY created_at DESC', [agentId]);
+  return res.json({ ok: true, docs: rows });
 });
 
 app.post('/api/admin/knowledge', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
-  const { rows } = await pool.query('INSERT INTO knowledge_documents(agent_id,title,content_text,source) VALUES($1,$2,$3,$4) RETURNING *', [req.body.agentId, req.body.title, req.body.contentText, req.body.source]);
-  res.status(201).json(rows[0]);
-});
-
-app.post('/api/admin/templates', auth, requirePasswordUpdated, adminOnly, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'File required' });
-  if (req.body.isActive === 'true') await pool.query('UPDATE doc_templates SET is_active=false WHERE template_type=$1', [req.body.templateType]);
-  const { rows } = await pool.query('INSERT INTO doc_templates(name,template_type,is_active,docx_bytes,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id,name,template_type,is_active,created_at', [req.body.name, req.body.templateType, req.body.isActive === 'true', req.file.buffer, req.user.id]);
-  res.status(201).json(rows[0]);
+  const agentId = Number(req.body.agentId);
+  if (!agentId) return badRequest(res, 'agentId is required');
+  const titleValidation = validateTextField(req.body.title, 'title', 300);
+  const contentValidation = validateTextField(req.body.contentText, 'contentText', 50000);
+  if (!titleValidation.ok) return badRequest(res, titleValidation.message);
+  if (!contentValidation.ok) return badRequest(res, contentValidation.message);
+  const { rows } = await pool.query('INSERT INTO agent_knowledge(agent_id,title,content,source,is_active) VALUES($1,$2,$3,$4,true) RETURNING *', [agentId, titleValidation.value, contentValidation.value, String(req.body.source || '').trim()]);
+  await writeAgentAudit(agentId, req.user.id, 'legacy_create_knowledge', { knowledgeId: rows[0].id });
+  return res.status(201).json(rows[0]);
 });
 
 app.get('/api/admin/pricing', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {

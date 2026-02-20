@@ -115,7 +115,15 @@
         </section>
 
         <section id="adminPanel" class="panel hidden">
-          <h3>Admin Panels</h3>
+          <h3>Agent Control Center</h3>
+          <div class="actions">
+            <label>Агент
+              <select id="adminAgentSelector"></select>
+            </label>
+            <button id="adminRefreshAgentBtn" type="button">Обнови</button>
+          </div>
+          <p id="adminAgentStatus" class="status-message"></p>
+
           <div class="admin-tabs" id="adminTabs">
             <button data-admin-tab="users" class="active">Users</button>
             <button data-admin-tab="prompts">Prompts</button>
@@ -125,6 +133,8 @@
             <button data-admin-tab="agents">Agents</button>
             <button data-admin-tab="sessions">Sessions</button>
             <button data-admin-tab="audit">Audit</button>
+            <button data-admin-tab="examples">Examples</button>
+            <button data-admin-tab="debug">Debug</button>
           </div>
 
           <div id="adminUsersTab" class="admin-tab-pane">
@@ -137,89 +147,39 @@
               </div>
               <div class="admin-user-row admin-user-row-5">
                 <label class="field-short">Пол
-                  <select name="gender">
-                    <option value="male">male</option>
-                    <option value="female">female</option>
-                    <option value="other">other</option>
-                  </select>
+                  <select name="gender"><option value="male">male</option><option value="female">female</option><option value="other">other</option></select>
                 </label>
                 <label class="field-short">Роля
-                  <select name="role">
-                    <option value="user">user</option>
-                    <option value="manager">manager</option>
-                    <option value="admin">admin</option>
-                  </select>
+                  <select name="role"><option value="user">user</option><option value="manager">manager</option><option value="admin">admin</option></select>
                 </label>
-                <label class="field-short password-inline">Парола
-                  <input name="password" id="adminGeneratedPassword" placeholder="Генерирай или въведи" />
-                </label>
-                <div class="action-button-wrap">
-                  <button type="button" id="generatePasswordBtn">Генерирай</button>
-                </div>
-                <div class="action-button-wrap">
-                  <button type="button" id="copyPasswordBtn">Копирай</button>
-                </div>
+                <label class="field-short password-inline">Парола<input name="password" id="adminGeneratedPassword" placeholder="Генерирай или въведи" /></label>
+                <div class="action-button-wrap"><button type="button" id="generatePasswordBtn">Генерирай</button></div>
+                <div class="action-button-wrap"><button type="button" id="copyPasswordBtn">Копирай</button></div>
               </div>
               <button type="submit">Създай потребител</button>
             </form>
             <p id="adminUserStatus" class="status-message"></p>
-            <div class="admin-users-table-wrap">
-              <table class="admin-table admin-users-table" id="adminUsersTable">
-                <colgroup>
-                  <col class="u-name" />
-                  <col class="u-email" />
-                  <col class="u-role" />
-                  <col class="u-status" />
-                  <col class="u-actions" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Име</th>
-                    <th>Email</th>
-                    <th>Роля</th>
-                    <th>Статус</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody id="adminUsersList"></tbody>
-              </table>
-            </div>
+            <div class="admin-users-table-wrap"><table class="admin-table admin-users-table" id="adminUsersTable"><thead><tr><th>Име</th><th>Email</th><th>Роля</th><th>Статус</th><th>Действия</th></tr></thead><tbody id="adminUsersList"></tbody></table></div>
           </div>
 
-          
-          <div id="adminSessionsTab" class="admin-tab-pane hidden">
-            <h4 id="sessionsTitle">Потребителски сесии</h4>
-            <div class="actions">
-              <button id="refreshSessionsBtn" type="button">Обнови сесиите</button>
-            </div>
-            <div class="admin-users-table-wrap">
-              <table class="admin-table admin-sessions-table" id="adminSessionsTable">
-                <colgroup>
-                  <col class="s-status" />
-                  <col class="s-user" />
-                  <col class="s-email" />
-                  <col class="s-login" />
-                  <col class="s-seen" />
-                  <col class="s-duration" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Статус</th>
-                    <th>Потребител</th>
-                    <th>Email</th>
-                    <th>Логнат от</th>
-                    <th>Последна активност</th>
-                    <th>Продължителност</th>
-                  </tr>
-                </thead>
-                <tbody id="adminSessionsList"></tbody>
-              </table>
-            </div>
+          <div id="adminPromptsTab" class="admin-tab-pane hidden">
+            <h4>Промпти</h4>
+            <form id="adminPromptForm" class="admin-form">
+              <label>Тип<select name="type"><option value="system">system</option><option value="style">style</option><option value="rules">rules</option></select></label>
+              <label>Съдържание<textarea name="content" rows="6" required></textarea></label>
+              <button type="submit">Нов промпт</button>
+            </form>
+            <ul id="adminPromptsList"></ul>
           </div>
 
-          <div id="adminPlaceholder" class="admin-tab-pane hidden">
-            <p>Избраният административен таб е готов за свързване към съществуващите защитени API endpoints на платформата.</p>
-          </div>
+          <div id="adminKnowledgeTab" class="admin-tab-pane hidden"><h4>Знания</h4><form id="adminKnowledgeForm" class="admin-form"><label>Title<input name="title" required></label><label>Content<textarea name="content" rows="5" required></textarea></label><label>Source<input name="source"></label><label>Tags (comma)<input name="tags"></label><button type="submit">Добави</button></form><ul id="adminKnowledgeList"></ul></div>
+          <div id="adminTemplatesTab" class="admin-tab-pane hidden"><h4>Шаблони</h4><form id="adminTemplateForm" class="admin-form"><label>Name<input name="name" required></label><label>Content<textarea name="content" rows="5" required></textarea></label><label>Tags<input name="tags"></label><button type="submit">Добави</button></form><ul id="adminTemplatesList"></ul></div>
+          <div id="adminPricingTab" class="admin-tab-pane hidden"><h4>Цени</h4><p>Scaffold за бъдещи цени по агент.</p></div>
+          <div id="adminAgentsTab" class="admin-tab-pane hidden"><h4>Агенти</h4><form id="adminAgentEditForm" class="admin-form"><label>Name<input name="name" required></label><label>Description<textarea name="description" rows="3"></textarea></label><label>Enabled<select name="is_enabled"><option value="true">true</option><option value="false">false</option></select></label><button type="submit">Запази агент</button></form><ul id="adminAgentsList"></ul></div>
+          <div id="adminSessionsTab" class="admin-tab-pane hidden"><h4 id="sessionsTitle">Потребителски сесии</h4><div class="actions"><button id="refreshSessionsBtn" type="button">Обнови сесиите</button></div><div class="admin-users-table-wrap"><table class="admin-table admin-sessions-table" id="adminSessionsTable"><thead><tr><th>Статус</th><th>Потребител</th><th>Email</th><th>Логнат от</th><th>Последна активност</th><th>Продължителност</th></tr></thead><tbody id="adminSessionsList"></tbody></table></div></div>
+          <div id="adminAuditTab" class="admin-tab-pane hidden"><h4>Одит</h4><ul id="adminAuditList"></ul></div>
+          <div id="adminExamplesTab" class="admin-tab-pane hidden"><h4>Training examples</h4><form id="adminExampleForm" class="admin-form"><label>Input<textarea name="input_text" rows="3" required></textarea></label><label>Output<textarea name="output_text" rows="3" required></textarea></label><label>Status<select name="status"><option>draft</option><option>approved</option><option>rejected</option></select></label><button type="submit">Добави</button></form><ul id="adminExamplesList"></ul></div>
+          <div id="adminDebugTab" class="admin-tab-pane hidden"><h4>Debug context</h4><pre id="adminDebugBox"></pre></div>
         </section>
       </main>
     </div>

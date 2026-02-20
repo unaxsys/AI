@@ -306,7 +306,7 @@ async function loadMe() {
 
     setActiveSidebar();
     updateWorkspaceVisibility();
-    if (me.role === 'admin') { loadAdminUsers(); loadAdminSessions(); }
+    if (me.role === 'admin') { loadAdminUsers(); loadAdminSessions(); bootstrapAdminCenter(); }
   } catch {
     logout();
   }
@@ -540,186 +540,210 @@ document.getElementById('saveSettingsBtn').onclick = async () => {
   }
 };
 
+const adminAgentSelector = document.getElementById('adminAgentSelector');
+const adminAgentStatus = document.getElementById('adminAgentStatus');
+let adminAgentsCache = [];
+let adminSelectedAgentId = null;
+
+function showAdminStatus(message, isError = false) {
+  if (!adminAgentStatus) return;
+  adminAgentStatus.textContent = message || '';
+  adminAgentStatus.className = isError ? 'status-message' : 'status-message success';
+}
+
+async function loadAdminAgents() {
+  const data = await api('/api/admin/agents');
+  adminAgentsCache = data.agents || [];
+  if (!adminAgentSelector) return;
+  adminAgentSelector.innerHTML = adminAgentsCache.map((a) => `<option value="${a.id}">${a.name} (${a.key})</option>`).join('');
+  if (!adminSelectedAgentId && adminAgentsCache[0]) adminSelectedAgentId = adminAgentsCache[0].id;
+  if (adminSelectedAgentId) adminAgentSelector.value = String(adminSelectedAgentId);
+}
+
+function selectedAgent() {
+  return adminAgentsCache.find((a) => String(a.id) === String(adminSelectedAgentId));
+}
+
+function renderSimpleList(containerId, rows, formatter) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  rows.forEach((row) => {
+    const li = document.createElement('li');
+    li.innerHTML = formatter(row);
+    el.appendChild(li);
+  });
+}
+
+async function loadAgentDataForActiveTab(tab) {
+  if (!adminSelectedAgentId) return;
+  if (tab === 'prompts') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/prompts`);
+    renderSimpleList('adminPromptsList', data.prompts || [], (p) => `${p.type} v${p.version} ${p.is_active ? '[active]' : ''}<br/><small>${(p.content || '').slice(0, 180)}</small> <button data-activate-prompt="${p.id}">Активирай</button>`);
+  }
+  if (tab === 'knowledge') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/knowledge`);
+    renderSimpleList('adminKnowledgeList', data.knowledge || [], (k) => `${k.title} ${k.is_active ? '' : '(off)'}<br/><small>${(k.content || '').slice(0, 140)}</small> <button data-delete-knowledge="${k.id}">Delete</button>`);
+  }
+  if (tab === 'templates') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/templates`);
+    renderSimpleList('adminTemplatesList', data.templates || [], (t) => `${t.name}<br/><small>${(t.content || '').slice(0, 140)}</small> <button data-delete-template="${t.id}">Delete</button>`);
+  }
+  if (tab === 'agents') {
+    renderSimpleList('adminAgentsList', adminAgentsCache, (a) => `${a.name} (${a.key}) - ${a.is_enabled ? 'enabled' : 'disabled'}`);
+    const current = selectedAgent();
+    const form = document.getElementById('adminAgentEditForm');
+    if (current && form) {
+      form.name.value = current.name || '';
+      form.description.value = current.description || '';
+      form.is_enabled.value = String(Boolean(current.is_enabled));
+    }
+  }
+  if (tab === 'audit') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/audit`);
+    renderSimpleList('adminAuditList', data.audit || [], (a) => `${a.action} <small>${new Date(a.created_at).toLocaleString()}</small>`);
+  }
+  if (tab === 'examples') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/examples`);
+    renderSimpleList('adminExamplesList', data.examples || [], (e) => `${e.status} | ${(e.input_text || '').slice(0, 80)} <button data-approve-example="${e.id}">Approve</button> <button data-reject-example="${e.id}">Reject</button>`);
+  }
+  if (tab === 'debug') {
+    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/debug-context`);
+    const box = document.getElementById('adminDebugBox');
+    if (box) box.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
 document.getElementById('generatePasswordBtn').onclick = () => {
   document.getElementById('adminGeneratedPassword').value = randomPassword();
 };
 
 document.getElementById('copyPasswordBtn').onclick = async () => {
   const password = document.getElementById('adminGeneratedPassword').value || '';
-  if (!password) {
-    document.getElementById('adminUserStatus').textContent = 'Няма парола за копиране.';
-    document.getElementById('adminUserStatus').className = 'status-message';
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(password);
-    document.getElementById('adminUserStatus').textContent = 'Паролата е копирана.';
-    document.getElementById('adminUserStatus').className = 'status-message success';
-  } catch {
-    const temp = document.createElement('textarea');
-    temp.value = password;
-    document.body.appendChild(temp);
-    temp.select();
-    document.execCommand('copy');
-    document.body.removeChild(temp);
-    document.getElementById('adminUserStatus').textContent = 'Паролата е копирана.';
-    document.getElementById('adminUserStatus').className = 'status-message success';
-  }
+  if (!password) return;
+  await navigator.clipboard.writeText(password).catch(() => {});
 };
 
 document.getElementById('adminCreateUserForm').onsubmit = async (e) => {
   e.preventDefault();
   const form = e.target;
   try {
-    const payload = {
-      email: form.email.value,
-      firstName: form.firstName.value,
-      lastName: form.lastName.value,
-      gender: form.gender.value,
-      role: form.role.value,
-      password: form.password.value
-    };
+    const payload = { email: form.email.value, firstName: form.firstName.value, lastName: form.lastName.value, gender: form.gender.value, role: form.role.value, password: form.password.value };
     const result = await api('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) });
     document.getElementById('adminUserStatus').textContent = `Потребителят е създаден. Временна парола: ${result.tempPassword}`;
     document.getElementById('adminUserStatus').className = 'status-message success';
     form.reset();
-    loadAdminUsers();
+    await loadAdminUsers();
   } catch (e2) {
     document.getElementById('adminUserStatus').textContent = e2.message;
     document.getElementById('adminUserStatus').className = 'status-message';
   }
 };
 
-async function resetUserPassword(userId) {
-  const data = await api(`/api/admin/users/${userId}/reset-password`, { method: 'POST' });
-  document.getElementById('adminUserStatus').textContent = `Нова временна парола: ${data.tempPassword}`;
-  document.getElementById('adminUserStatus').className = 'status-message success';
-}
-
-async function toggleUserActive(user) {
-  await api(`/api/admin/users/${user.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ isActive: !user.isActive })
-  });
-}
-
-async function deleteUser(user) {
-  if (!confirm(`Сигурни ли сте, че искате да изтриете ${user.displayName}?`)) return;
-  await api(`/api/admin/users/${user.id}`, { method: 'DELETE' });
-}
+async function resetUserPassword(userId) { const data = await api(`/api/admin/users/${userId}/reset-password`, { method: 'POST' }); document.getElementById('adminUserStatus').textContent = `Нова временна парола: ${data.tempPassword}`; }
+async function toggleUserActive(user) { await api(`/api/admin/users/${user.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !user.isActive }) }); }
+async function deleteUser(user) { if (!confirm(`Сигурни ли сте, че искате да изтриете ${user.displayName}?`)) return; await api(`/api/admin/users/${user.id}`, { method: 'DELETE' }); }
 
 async function loadAdminUsers() {
   if (!meState || meState.role !== 'admin') return;
   const res = await api('/api/admin/users');
   const list = document.getElementById('adminUsersList');
   list.innerHTML = '';
-
   res.users.forEach((u) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${u.displayName}</td><td>${u.email}</td><td>${u.role}</td><td>${u.isActive ? I18N[currentLanguage].table.active : I18N[currentLanguage].table.inactive}</td><td class="actions-cell"></td>`;
     const actionsTd = tr.querySelector('td:last-child');
-    const actions = document.createElement('div');
-    actions.className = 'table-actions';
-
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'btn-secondary btn-compact';
-    resetBtn.textContent = currentLanguage === 'bg' ? 'Ресет парола' : 'Reset password';
-    resetBtn.onclick = async () => {
-      try {
-        await resetUserPassword(u.id);
-      } catch (e) {
-        document.getElementById('adminUserStatus').textContent = e.message;
-        document.getElementById('adminUserStatus').className = 'status-message';
-      }
-    };
-
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'btn-warning btn-compact';
-    toggleBtn.textContent = u.isActive ? (currentLanguage === 'bg' ? 'Деактивирай' : 'Deactivate') : (currentLanguage === 'bg' ? 'Активирай' : 'Activate');
-    toggleBtn.onclick = async () => {
-      try {
-        await toggleUserActive(u);
-        await loadAdminUsers();
-      } catch (e) {
-        document.getElementById('adminUserStatus').textContent = e.message;
-        document.getElementById('adminUserStatus').className = 'status-message';
-      }
-    };
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'btn-danger btn-compact';
-    deleteBtn.textContent = currentLanguage === 'bg' ? 'Изтрий' : 'Delete';
-    deleteBtn.onclick = async () => {
-      try {
-        await deleteUser(u);
-        await loadAdminUsers();
-      } catch (e) {
-        document.getElementById('adminUserStatus').textContent = e.message;
-        document.getElementById('adminUserStatus').className = 'status-message';
-      }
-    };
-
-    actions.appendChild(resetBtn);
-    actions.appendChild(toggleBtn);
-    actions.appendChild(deleteBtn);
-    actionsTd.appendChild(actions);
-    list.appendChild(tr);
+    const actions = document.createElement('div'); actions.className = 'table-actions';
+    ['reset','toggle','delete'].forEach((kind) => { const b=document.createElement('button'); b.className='btn-secondary btn-compact'; b.textContent=kind; b.onclick=async()=>{ try { if(kind==='reset') await resetUserPassword(u.id); if(kind==='toggle'){await toggleUserActive(u); await loadAdminUsers();} if(kind==='delete'){await deleteUser(u); await loadAdminUsers();} } catch(err){ document.getElementById('adminUserStatus').textContent = err.message; } }; actions.appendChild(b); });
+    actionsTd.appendChild(actions); list.appendChild(tr);
   });
 }
 
-
-function formatDuration(seconds) {
-  if (seconds === null || Number.isNaN(seconds)) return '-';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h}h ${m}m ${s}s`;
-}
-
-function formatDateTimeCell(value) {
-  if (!value) return '-';
-  const d = new Date(value);
-  const date = d.toLocaleDateString();
-  const time = d.toLocaleTimeString();
-  return `<div class="datetime-cell"><span>${date}</span><small>${time}</small></div>`;
-}
+function formatDuration(seconds) { if (seconds === null || Number.isNaN(seconds)) return '-'; const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const sec = seconds % 60; return `${h}h ${m}m ${sec}s`; }
+function formatDateTimeCell(value) { if (!value) return '-'; const d = new Date(value); return `<div class="datetime-cell"><span>${d.toLocaleDateString()}</span><small>${d.toLocaleTimeString()}</small></div>`; }
 
 async function loadAdminSessions() {
   if (!meState || meState.role !== 'admin') return;
   const res = await api('/api/admin/sessions');
-  const list = document.getElementById('adminSessionsList');
-  if (!list) return;
+  const list = document.getElementById('adminSessionsList'); if (!list) return;
   list.innerHTML = '';
-
   res.sessions.forEach((session) => {
     const tr = document.createElement('tr');
     const statusText = session.isOnline ? I18N[currentLanguage].sessions.online : I18N[currentLanguage].sessions.offline;
-    tr.innerHTML = `
-      <td><div class="session-status"><span class="status-dot ${session.isOnline ? 'online' : 'offline'}"></span>${statusText}</div></td>
-      <td>${session.displayName}</td>
-      <td>${session.email}</td>
-      <td>${formatDateTimeCell(session.lastLoginAt)}</td>
-      <td>${formatDateTimeCell(session.lastSeenAt)}</td>
-      <td>${formatDuration(session.sessionDurationSec)}</td>
-    `;
+    tr.innerHTML = `<td><div class="session-status"><span class="status-dot ${session.isOnline ? 'online' : 'offline'}"></span>${statusText}</div></td><td>${session.displayName}</td><td>${session.email}</td><td>${formatDateTimeCell(session.lastLoginAt)}</td><td>${formatDateTimeCell(session.lastSeenAt)}</td><td>${formatDuration(session.sessionDurationSec)}</td>`;
     list.appendChild(tr);
   });
 }
 
 document.getElementById('refreshSessionsBtn').onclick = loadAdminSessions;
 
+if (adminAgentSelector) {
+  adminAgentSelector.onchange = async () => {
+    adminSelectedAgentId = Number(adminAgentSelector.value);
+    const activeTab = document.querySelector('#adminTabs button.active')?.dataset.adminTab || 'users';
+    await loadAgentDataForActiveTab(activeTab).catch((e) => showAdminStatus(e.message, true));
+  };
+}
+
+const promptForm = document.getElementById('adminPromptForm');
+if (promptForm) promptForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/prompts`, { method: 'POST', body: JSON.stringify({ type: promptForm.type.value, content: promptForm.content.value }) }); promptForm.reset(); showAdminStatus('Промптът е добавен.'); await loadAgentDataForActiveTab('prompts'); } catch (err) { showAdminStatus(err.message, true); } };
+
+const knowledgeForm = document.getElementById('adminKnowledgeForm');
+if (knowledgeForm) knowledgeForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/knowledge`, { method: 'POST', body: JSON.stringify({ title: knowledgeForm.title.value, content: knowledgeForm.content.value, source: knowledgeForm.source.value, tags: knowledgeForm.tags.value }) }); knowledgeForm.reset(); showAdminStatus('Знанието е добавено.'); await loadAgentDataForActiveTab('knowledge'); } catch (err) { showAdminStatus(err.message, true); } };
+
+const templateForm = document.getElementById('adminTemplateForm');
+if (templateForm) templateForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/templates`, { method: 'POST', body: JSON.stringify({ name: templateForm.name.value, content: templateForm.content.value, tags: templateForm.tags.value }) }); templateForm.reset(); showAdminStatus('Шаблонът е добавен.'); await loadAgentDataForActiveTab('templates'); } catch (err) { showAdminStatus(err.message, true); } };
+
+const exampleForm = document.getElementById('adminExampleForm');
+if (exampleForm) exampleForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/examples`, { method: 'POST', body: JSON.stringify({ input_text: exampleForm.input_text.value, output_text: exampleForm.output_text.value, status: exampleForm.status.value }) }); exampleForm.reset(); showAdminStatus('Примерът е добавен.'); await loadAgentDataForActiveTab('examples'); } catch (err) { showAdminStatus(err.message, true); } };
+
+const agentEditForm = document.getElementById('adminAgentEditForm');
+if (agentEditForm) agentEditForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}`, { method: 'PUT', body: JSON.stringify({ name: agentEditForm.name.value, description: agentEditForm.description.value, is_enabled: agentEditForm.is_enabled.value === 'true' }) }); showAdminStatus('Агентът е обновен.'); await loadAdminAgents(); await loadAgentDataForActiveTab('agents'); } catch (err) { showAdminStatus(err.message, true); } };
+
+document.getElementById('adminRefreshAgentBtn').onclick = async () => {
+  try {
+    await loadAdminAgents();
+    const activeTab = document.querySelector('#adminTabs button.active')?.dataset.adminTab || 'users';
+    await loadAgentDataForActiveTab(activeTab);
+    showAdminStatus('Данните са обновени.');
+  } catch (e) {
+    showAdminStatus(e.message, true);
+  }
+};
+
+document.getElementById('adminPanel').addEventListener('click', async (event) => {
+  const activateBtn = event.target.closest('[data-activate-prompt]');
+  const deleteKnowledgeBtn = event.target.closest('[data-delete-knowledge]');
+  const deleteTemplateBtn = event.target.closest('[data-delete-template]');
+  const approveExampleBtn = event.target.closest('[data-approve-example]');
+  const rejectExampleBtn = event.target.closest('[data-reject-example]');
+  try {
+    if (activateBtn) { await api(`/api/admin/prompts/${activateBtn.dataset.activatePrompt}/activate`, { method: 'POST' }); await loadAgentDataForActiveTab('prompts'); showAdminStatus('Промптът е активиран.'); }
+    if (deleteKnowledgeBtn) { await api(`/api/admin/knowledge/${deleteKnowledgeBtn.dataset.deleteKnowledge}`, { method: 'DELETE' }); await loadAgentDataForActiveTab('knowledge'); showAdminStatus('Изтрито.'); }
+    if (deleteTemplateBtn) { await api(`/api/admin/templates/${deleteTemplateBtn.dataset.deleteTemplate}`, { method: 'DELETE' }); await loadAgentDataForActiveTab('templates'); showAdminStatus('Изтрито.'); }
+    if (approveExampleBtn) { await api(`/api/admin/examples/${approveExampleBtn.dataset.approveExample}/approve`, { method: 'POST' }); await loadAgentDataForActiveTab('examples'); showAdminStatus('Одобрен пример.'); }
+    if (rejectExampleBtn) { await api(`/api/admin/examples/${rejectExampleBtn.dataset.rejectExample}/reject`, { method: 'POST' }); await loadAgentDataForActiveTab('examples'); showAdminStatus('Отхвърлен пример.'); }
+  } catch (err) { showAdminStatus(err.message, true); }
+});
+
 document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((btn) => {
-  btn.onclick = () => {
+  btn.onclick = async () => {
     document.querySelectorAll('#adminTabs button[data-admin-tab]').forEach((b) => b.classList.toggle('active', b === btn));
-    const isUsers = btn.dataset.adminTab === 'users';
-    const isSessions = btn.dataset.adminTab === 'sessions';
-    document.getElementById('adminUsersTab').classList.toggle('hidden', !isUsers);
-    document.getElementById('adminSessionsTab').classList.toggle('hidden', !isSessions);
-    document.getElementById('adminPlaceholder').classList.toggle('hidden', isUsers || isSessions);
-    if (isSessions) loadAdminSessions();
+    const tab = btn.dataset.adminTab;
+    ['Users','Prompts','Knowledge','Templates','Pricing','Agents','Sessions','Audit','Examples','Debug'].forEach((name) => {
+      const pane = document.getElementById(`admin${name}Tab`);
+      if (pane) pane.classList.toggle('hidden', tab !== name.toLowerCase());
+    });
+    if (tab === 'sessions') await loadAdminSessions();
+    if (tab !== 'users' && tab !== 'sessions') await loadAgentDataForActiveTab(tab);
   };
 });
+
+async function bootstrapAdminCenter() {
+  if (!meState || meState.role !== 'admin') return;
+  await loadAdminAgents();
+  await loadAgentDataForActiveTab('prompts').catch(() => {});
+}
 
 applyTheme(localStorage.getItem('theme') || 'dark');
 applyLanguage(localStorage.getItem('language') || 'bg');
