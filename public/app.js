@@ -552,41 +552,52 @@ function renderSections(sections) {
     const label = document.createElement('label');
     label.className = 'section-title';
     label.textContent = `${index + 1}. ${String(s.section_type || '').replace(/_/g, ' ')}`;
+    const actions = document.createElement('div');
+    actions.className = 'section-actions';
+    const exportDocxSectionBtn = document.createElement('button');
+    exportDocxSectionBtn.className = 'btn-secondary';
+    exportDocxSectionBtn.type = 'button';
+    exportDocxSectionBtn.textContent = 'DOCX';
+    exportDocxSectionBtn.onclick = () => exportTask('docx', s.section_type);
+    const exportPdfSectionBtn = document.createElement('button');
+    exportPdfSectionBtn.className = 'btn-secondary';
+    exportPdfSectionBtn.type = 'button';
+    exportPdfSectionBtn.textContent = 'PDF';
+    exportPdfSectionBtn.onclick = () => exportTask('pdf', s.section_type);
+    actions.appendChild(exportDocxSectionBtn);
+    actions.appendChild(exportPdfSectionBtn);
+
     const ta = document.createElement('textarea');
     ta.dataset.section = s.section_type;
     ta.value = s.content_final || s.content_draft || '';
     wrap.appendChild(label);
+    wrap.appendChild(actions);
     wrap.appendChild(ta);
     el.appendChild(wrap);
   });
 }
 
 
-document.getElementById('exportDocx').onclick = async () => {
+async function exportTask(format, sectionType = '') {
   if (!currentTaskId) return alert('Create/open task first');
-  const response = await fetch(`/api/tasks/${currentTaskId}/export?format=docx`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) return alert('Export DOCX failed');
+  const query = new URLSearchParams({ format });
+  if (sectionType) query.set('sectionType', sectionType);
+  const response = await fetch(`/api/tasks/${currentTaskId}/export?${query.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    return alert(`Export ${format.toUpperCase()} failed`);
+  }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `task_${currentTaskId}.docx`;
+  const safeSection = sectionType ? `_${sectionType.replace(/[^a-z0-9_-]/gi, '_')}` : '';
+  a.download = `task_${currentTaskId}${safeSection}.${format}`;
   a.click();
   URL.revokeObjectURL(url);
-};
+}
 
-document.getElementById('exportPdf').onclick = async () => {
-  if (!currentTaskId) return alert('Create/open task first');
-  const response = await fetch(`/api/tasks/${currentTaskId}/export?format=pdf`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) return alert('Export PDF failed');
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `task_${currentTaskId}.pdf`;
-  a.click();
-  URL.revokeObjectURL(url);
-};
+document.getElementById('exportDocx').onclick = () => exportTask('docx');
+document.getElementById('exportPdf').onclick = () => exportTask('pdf');
 
 document.getElementById('profileForm').onsubmit = async (e) => {
   e.preventDefault();

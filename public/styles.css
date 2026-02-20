@@ -155,4 +155,7 @@ aside button.active { background: var(--accent); }
 #sections { display:flex; flex-direction:column; gap:10px; }
 .section-card { border:1px solid var(--border); border-radius:10px; padding:10px; background:color-mix(in oklab, var(--panel), #8aa0c8 6%); }
 .section-title { font-weight:700; display:block; margin-bottom:6px; text-transform:capitalize; }
+
+.section-actions { display:flex; gap:6px; margin-bottom:8px; }
+.section-actions .btn-secondary { padding:4px 8px; font-size:12px; }
 .section-card textarea { width:100%; min-height:120px; line-height:1.45; }
