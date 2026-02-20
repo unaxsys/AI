@@ -91,6 +91,94 @@ async function buildKnowledge(agentId) {
   return rows.map((r) => `# ${r.title}\n${r.content_text}`).join('\n\n');
 }
 
+async function getActivePriceList() {
+  const { rows } = await pool.query('SELECT * FROM offers_price_lists WHERE is_active=true ORDER BY id DESC LIMIT 1');
+  return rows[0] || null;
+}
+
+function pickTier(items, qty) {
+  const targetQty = Number(qty || 1);
+  return items.find((item) => {
+    const min = Number(item.tier_min || 0);
+    const max = item.tier_max == null ? null : Number(item.tier_max);
+    if (targetQty < min) return false;
+    if (max == null) return true;
+    return targetQty <= max;
+  }) || null;
+}
+
+async function computeOfferPricing({ currency = 'BGN', vatMode = 'standard', items = [] }) {
+  const activePriceList = await getActivePriceList();
+  if (!activePriceList) {
+    return {
+      pricingConfigured: false,
+      subtotal: null,
+      vatAmount: null,
+      total: null,
+      breakdown: 'TBD / requires admin pricing setup',
+      resolvedItems: []
+    };
+  }
+
+  const { rows } = await pool.query(
+    `SELECT *
+     FROM offers_price_items
+     WHERE price_list_id=$1 AND is_active=true
+     ORDER BY service_key ASC, tier_min ASC, id ASC`,
+    [activePriceList.id]
+  );
+
+  const grouped = rows.reduce((acc, row) => {
+    const key = row.service_key;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+
+  const resolvedItems = items.map((item, idx) => {
+    const serviceKey = String(item.serviceKey || '').trim();
+    const qty = Number(item.qty || 1) || 1;
+    const tiers = grouped[serviceKey] || [];
+    const tier = pickTier(tiers, qty);
+    const unitPrice = tier ? Number(tier.unit_price) : 0;
+    const lineTotal = Number((qty * unitPrice).toFixed(2));
+    return {
+      lineNo: idx + 1,
+      serviceKey,
+      description: String(item.description || tier?.service_name || serviceKey || 'Service').trim(),
+      qty,
+      unit: String(item.unit || tier?.unit || 'unit').trim(),
+      unitPrice,
+      lineTotal,
+      matched: Boolean(tier)
+    };
+  });
+
+  const subtotal = Number(resolvedItems.reduce((acc, row) => acc + row.lineTotal, 0).toFixed(2));
+  const vatPercent = vatMode === 'none' ? 0 : Number(activePriceList.vat_percent || 20);
+  const vatAmount = Number((subtotal * (vatPercent / 100)).toFixed(2));
+  const total = Number((subtotal + vatAmount).toFixed(2));
+  const outCurrency = String(currency || activePriceList.currency || 'BGN').toUpperCase();
+  const lines = resolvedItems.map((row) => `- ${row.description}: ${row.qty} x ${row.unitPrice.toFixed(2)} ${outCurrency} = ${row.lineTotal.toFixed(2)} ${outCurrency}`);
+  const breakdown = [
+    `Ценоразпис: ${activePriceList.name}`,
+    ...lines,
+    `Междинна сума: ${subtotal.toFixed(2)} ${outCurrency}`,
+    `ДДС (${vatPercent}%): ${vatAmount.toFixed(2)} ${outCurrency}`,
+    `Крайна сума: ${total.toFixed(2)} ${outCurrency}`
+  ].join('\n');
+
+  return {
+    pricingConfigured: true,
+    priceListId: activePriceList.id,
+    subtotal,
+    vatAmount,
+    total,
+    breakdown,
+    resolvedItems
+  };
+}
+
 function sectionsForAgent(code) {
   const map = {
     email: ['reply_short', 'reply_standard', 'reply_detailed'],
@@ -309,14 +397,34 @@ app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res
 
 app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
   const { clientCompany, clientName, clientEmail, leadText, currency = 'BGN', vatMode = 'standard' } = req.body;
-  const activePricing = await pool.query('SELECT * FROM pricing_versions WHERE is_active=true ORDER BY id DESC LIMIT 1');
+  const inputItems = Array.isArray(req.body.items) ? req.body.items : [];
+  const pricing = await computeOfferPricing({ currency, vatMode, items: inputItems });
+
   const offer = await pool.query(
-    'INSERT INTO offers(created_by,client_company,client_name,client_email,lead_text,currency,vat_mode,status,pricing_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-    [req.user.id, clientCompany, clientName, clientEmail, leadText, currency, vatMode, 'draft', activePricing.rows[0]?.id || null]
+    `INSERT INTO offers(created_by,client_company,client_name,client_email,lead_text,currency,vat_mode,subtotal,vat_amount,total,status,pricing_version_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [
+      req.user.id,
+      clientCompany,
+      clientName,
+      clientEmail,
+      leadText,
+      currency,
+      vatMode,
+      pricing.subtotal,
+      pricing.vatAmount,
+      pricing.total,
+      'draft',
+      pricing.priceListId || null
+    ]
   );
-  const pricingText = activePricing.rows[0] ? 'Ценообразуването ще се изчисли автоматично.' : 'TBD / requires admin pricing setup';
-  await pool.query('INSERT INTO offer_sections(offer_id, section_type, content) VALUES ($1,$2,$3),($1,$4,$5)', [offer.rows[0].id, 'offer_intro', 'Проектна оферта.', 'pricing', pricingText]);
-  res.status(201).json({ offer: offer.rows[0], pricingConfigured: Boolean(activePricing.rows[0]) });
+
+  await pool.query(
+    'INSERT INTO offer_sections(offer_id, section_type, content) VALUES ($1,$2,$3),($1,$4,$5)',
+    [offer.rows[0].id, 'offer_intro', 'Проектна оферта.', 'pricing', pricing.breakdown]
+  );
+
+  res.status(201).json({ offer: offer.rows[0], pricingConfigured: pricing.pricingConfigured });
 });
 
 app.post('/api/contracts', auth, requirePasswordUpdated, async (req, res) => {
@@ -482,6 +590,81 @@ app.post('/api/admin/pricing/versions', auth, requirePasswordUpdated, adminOnly,
   res.status(201).json(rows[0]);
 });
 
+app.get('/api/admin/offers/pricing', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  const active = await getActivePriceList();
+  return res.json({ ok: true, pricingConfigured: Boolean(active), activePriceList: active });
+});
+
+app.get('/api/admin/offers/price-lists', auth, requirePasswordUpdated, adminOnly, async (_req, res) => {
+  const { rows } = await pool.query('SELECT * FROM offers_price_lists ORDER BY created_at DESC, id DESC');
+  return res.json({ ok: true, priceLists: rows });
+});
+
+app.post('/api/admin/offers/price-lists', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const currency = String(req.body.currency || 'BGN').trim().toUpperCase() || 'BGN';
+  const vatPercent = Number(req.body.vatPercent ?? 20);
+  const isActive = Boolean(req.body.isActive);
+  if (!name) return res.status(400).json({ ok: false, error: 'Name is required' });
+  if (isActive) await pool.query('UPDATE offers_price_lists SET is_active=false, updated_at=now() WHERE is_active=true');
+  const { rows } = await pool.query(
+    `INSERT INTO offers_price_lists(name,currency,vat_percent,is_active,created_by,updated_at)
+     VALUES($1,$2,$3,$4,$5,now()) RETURNING *`,
+    [name, currency, vatPercent, isActive, req.user.id]
+  );
+  return res.status(201).json({ ok: true, priceList: rows[0] });
+});
+
+app.get('/api/admin/offers/price-items', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const priceListId = Number(req.query.priceListId || 0);
+  if (!priceListId) return res.status(400).json({ ok: false, error: 'priceListId is required' });
+  const { rows } = await pool.query('SELECT * FROM offers_price_items WHERE price_list_id=$1 ORDER BY service_key ASC, tier_min ASC, id ASC', [priceListId]);
+  return res.json({ ok: true, items: rows });
+});
+
+app.post('/api/admin/offers/price-items', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const { priceListId, serviceKey, serviceName, unit = 'unit', tierMin = 1, tierMax = null, unitPrice, isActive = true } = req.body;
+  if (!priceListId || !serviceKey || !serviceName || unitPrice == null) {
+    return res.status(400).json({ ok: false, error: 'Missing required fields' });
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO offers_price_items(price_list_id,service_key,service_name,unit,tier_min,tier_max,unit_price,is_active,updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()) RETURNING *`,
+    [priceListId, serviceKey, serviceName, unit, tierMin, tierMax, unitPrice, Boolean(isActive)]
+  );
+  return res.status(201).json({ ok: true, item: rows[0] });
+});
+
+app.patch('/api/admin/offers/price-items/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ ok: false, error: 'Invalid id' });
+  const current = await pool.query('SELECT * FROM offers_price_items WHERE id=$1', [id]);
+  const row = current.rows[0];
+  if (!row) return res.status(404).json({ ok: false, error: 'Not found' });
+  const payload = {
+    service_key: req.body.serviceKey ?? row.service_key,
+    service_name: req.body.serviceName ?? row.service_name,
+    unit: req.body.unit ?? row.unit,
+    tier_min: req.body.tierMin ?? row.tier_min,
+    tier_max: req.body.tierMax === undefined ? row.tier_max : req.body.tierMax,
+    unit_price: req.body.unitPrice ?? row.unit_price,
+    is_active: req.body.isActive === undefined ? row.is_active : Boolean(req.body.isActive)
+  };
+  const { rows } = await pool.query(
+    `UPDATE offers_price_items
+     SET service_key=$1,service_name=$2,unit=$3,tier_min=$4,tier_max=$5,unit_price=$6,is_active=$7,updated_at=now()
+     WHERE id=$8 RETURNING *`,
+    [payload.service_key, payload.service_name, payload.unit, payload.tier_min, payload.tier_max, payload.unit_price, payload.is_active, id]
+  );
+  return res.json({ ok: true, item: rows[0] });
+});
+
+app.delete('/api/admin/offers/price-items/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM offers_price_items WHERE id=$1', [req.params.id]);
+  if (!rowCount) return res.status(404).json({ ok: false, error: 'Not found' });
+  return res.json({ ok: true });
+});
+
 async function storeGenerated(entityType, entityId, format, mimeType, bytes, userId) {
   const { rows } = await pool.query('INSERT INTO generated_files(entity_type,entity_id,format,mime_type,file_bytes,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id', [entityType, entityId, format, mimeType, bytes, userId]);
   return rows[0].id;
@@ -541,8 +724,21 @@ app.get('/api/files/:id/download', auth, requirePasswordUpdated, async (req, res
 });
 
 app.get('/health', async (_req, res) => {
-  await pool.query('SELECT 1');
-  res.json({ status: 'ok' });
+  try {
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, db: true });
+  } catch {
+    return res.status(503).json({ ok: false, db: false });
+  }
+});
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, db: true });
+  } catch {
+    return res.status(503).json({ ok: false, db: false });
+  }
 });
 
 (async () => {
