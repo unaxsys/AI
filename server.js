@@ -265,6 +265,62 @@ async function computeOfferPricing({ currency = 'BGN', vatMode = 'standard', ite
   };
 }
 
+
+function buildTaskExportText(task, sections) {
+  const header = [
+    `Task #${task.id}`,
+    `Status: ${task.status}`,
+    `Created: ${task.created_at ? new Date(task.created_at).toISOString() : ''}`,
+    '',
+    'Input:',
+    String(task.input_text || '').trim(),
+    '',
+    'Output:'
+  ];
+  const output = sections.map((row, index) => {
+    const title = String(row.section_type || `section_${index + 1}`).replace(/_/g, ' ').toUpperCase();
+    return `${index + 1}. ${title}\n${String(row.content || '').trim()}`;
+  });
+  return [...header, ...output].join('\n').trim() + '\n';
+}
+
+function generateSimplePdfBuffer(text) {
+  const safe = String(text || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\r/g, '');
+  const lines = safe.split('\n').map((line) => line.slice(0, 110));
+  const content = ['BT', '/F1 11 Tf', '40 800 Td'];
+  lines.forEach((line, idx) => {
+    if (idx > 0) content.push('0 -16 Td');
+    content.push(`(${line || ' '}) Tj`);
+  });
+  content.push('ET');
+  const streamContent = content.join('\n');
+  const objects = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+    `5 0 obj << /Length ${Buffer.byteLength(streamContent, 'utf8')} >> stream\n${streamContent}\nendstream endobj`
+  ];
+  let pdf = '%PDF-1.4\n';
+  const xref = [0];
+  objects.forEach((obj) => {
+    xref.push(Buffer.byteLength(pdf, 'utf8'));
+    pdf += `${obj}\n`;
+  });
+  const xrefStart = Buffer.byteLength(pdf, 'utf8');
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  xref.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return Buffer.from(pdf, 'utf8');
+}
+
 async function getActiveDocTemplate(agentId, templateType) {
   const { rows } = await pool.query(
     `SELECT id, name, template_type, docx_bytes, mime_type, original_filename
@@ -503,6 +559,35 @@ app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, r
   }
   await pool.query('UPDATE tasks SET updated_at=now() WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
+});
+
+
+app.get('/api/tasks/:id/export', auth, requirePasswordUpdated, async (req, res) => {
+  const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
+  const taskResult = await pool.query('SELECT * FROM tasks WHERE id=$1 AND created_by=$2', [req.params.id, req.user.id]);
+  const task = taskResult.rows[0];
+  if (!task) return res.status(404).json({ ok: false, message: 'Task not found' });
+
+  const sections = await pool.query(
+    `SELECT section_type, COALESCE(content_final, content_draft, '') AS content
+     FROM task_sections
+     WHERE task_id=$1
+     ORDER BY id`,
+    [req.params.id]
+  );
+  const text = buildTaskExportText(task, sections.rows);
+
+  if (format === 'pdf') {
+    const pdfBytes = generateSimplePdfBuffer(text);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=task_${task.id}.pdf`);
+    return res.send(pdfBytes);
+  }
+
+  const docxBytes = Buffer.from(text, 'utf8');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename=task_${task.id}.docx`);
+  return res.send(docxBytes);
 });
 
 app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res) => {
