@@ -137,3 +137,9 @@ aside button.active { background: var(--accent); }
   color:var(--text);
   z-index:99;
 }
+
+.agent-form-actions { display:flex; align-items:flex-end; }
+.agent-form-actions button { width:max-content; }
+.agent-knowledge-list { margin:8px 0 0; padding-left:18px; display:flex; flex-direction:column; gap:6px; }
+.agent-knowledge-list li { display:flex; flex-direction:column; gap:2px; }
+.agent-knowledge-list small { opacity:0.75; }
