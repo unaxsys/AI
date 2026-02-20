@@ -197,6 +197,24 @@ CREATE TABLE IF NOT EXISTS generated_files (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-INSERT INTO agents(code,name) VALUES
-('email','Email Replies'),('offers','Offers'),('contracts','Contracts'),('support','Support'),('marketing','Marketing'),('recruiting','Recruiting')
-ON CONFLICT (code) DO NOTHING;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='agents' AND column_name='key'
+  ) THEN
+    INSERT INTO agents(code,key,name) VALUES
+    ('email','email','Email Replies'),
+    ('offers','offers','Offers'),
+    ('contracts','contracts','Contracts'),
+    ('support','support','Support'),
+    ('marketing','marketing','Marketing'),
+    ('recruiting','recruiting','Recruiting')
+    ON CONFLICT (code) DO NOTHING;
+  ELSE
+    INSERT INTO agents(code,name) VALUES
+    ('email','Email Replies'),('offers','Offers'),('contracts','Contracts'),('support','Support'),('marketing','Marketing'),('recruiting','Recruiting')
+    ON CONFLICT (code) DO NOTHING;
+  END IF;
+END $$;

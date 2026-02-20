@@ -542,6 +542,7 @@ document.getElementById('saveSettingsBtn').onclick = async () => {
 
 const adminAgentSelector = document.getElementById('adminAgentSelector');
 const adminAgentStatus = document.getElementById('adminAgentStatus');
+const adminTemplateAgentSelector = document.getElementById('adminTemplateAgentSelector');
 let adminAgentsCache = [];
 let adminSelectedAgentId = null;
 
@@ -554,10 +555,18 @@ function showAdminStatus(message, isError = false) {
 async function loadAdminAgents() {
   const data = await api('/api/admin/agents');
   adminAgentsCache = data.agents || [];
-  if (!adminAgentSelector) return;
-  adminAgentSelector.innerHTML = adminAgentsCache.map((a) => `<option value="${a.id}">${a.name} (${a.key})</option>`).join('');
+  const optionsHtml = adminAgentsCache.map((a) => `<option value="${a.id}">${a.name} (${a.key})</option>`).join('');
+  if (adminAgentSelector) {
+    adminAgentSelector.innerHTML = optionsHtml;
+  }
+  if (adminTemplateAgentSelector) {
+    adminTemplateAgentSelector.innerHTML = optionsHtml;
+  }
   if (!adminSelectedAgentId && adminAgentsCache[0]) adminSelectedAgentId = adminAgentsCache[0].id;
-  if (adminSelectedAgentId) adminAgentSelector.value = String(adminSelectedAgentId);
+  if (adminSelectedAgentId && adminAgentSelector) adminAgentSelector.value = String(adminSelectedAgentId);
+  if (adminTemplateAgentSelector && adminTemplateAgentSelector.options.length) {
+    adminTemplateAgentSelector.value = String(adminSelectedAgentId || adminTemplateAgentSelector.options[0].value);
+  }
 }
 
 function selectedAgent() {
@@ -586,8 +595,8 @@ async function loadAgentDataForActiveTab(tab) {
     renderSimpleList('adminKnowledgeList', data.knowledge || [], (k) => `${k.title} ${k.is_active ? '' : '(off)'}<br/><small>${(k.content || '').slice(0, 140)}</small> <button data-delete-knowledge="${k.id}">Delete</button>`);
   }
   if (tab === 'templates') {
-    const data = await api(`/api/admin/agents/${adminSelectedAgentId}/templates`);
-    renderSimpleList('adminTemplatesList', data.templates || [], (t) => `${t.name}<br/><small>${(t.content || '').slice(0, 140)}</small> <button data-delete-template="${t.id}">Delete</button>`);
+    const data = await api('/api/admin/doc-templates');
+    renderSimpleList('adminTemplatesList', data.templates || [], (t) => `${t.name} · ${t.template_type}<br/><small>Агент: ${t.agent_name} (${t.agent_key}) · Файл: ${t.original_filename || 'n/a'} · ${t.is_active ? 'active' : 'inactive'}</small> <button data-delete-doc-template="${t.id}">Delete</button>`);
   }
   if (tab === 'agents') {
     renderSimpleList('adminAgentsList', adminAgentsCache, (a) => `${a.name} (${a.key}) - ${a.is_enabled ? 'enabled' : 'disabled'}`);
@@ -692,7 +701,19 @@ const knowledgeForm = document.getElementById('adminKnowledgeForm');
 if (knowledgeForm) knowledgeForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/knowledge`, { method: 'POST', body: JSON.stringify({ title: knowledgeForm.title.value, content: knowledgeForm.content.value, source: knowledgeForm.source.value, tags: knowledgeForm.tags.value }) }); knowledgeForm.reset(); showAdminStatus('Знанието е добавено.'); await loadAgentDataForActiveTab('knowledge'); } catch (err) { showAdminStatus(err.message, true); } };
 
 const templateForm = document.getElementById('adminTemplateForm');
-if (templateForm) templateForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/templates`, { method: 'POST', body: JSON.stringify({ name: templateForm.name.value, content: templateForm.content.value, tags: templateForm.tags.value }) }); templateForm.reset(); showAdminStatus('Шаблонът е добавен.'); await loadAgentDataForActiveTab('templates'); } catch (err) { showAdminStatus(err.message, true); } };
+if (templateForm) templateForm.onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const fd = new FormData(templateForm);
+    await api('/api/admin/doc-templates', { method: 'POST', body: fd, headers: {} });
+    templateForm.reset();
+    if (templateForm.isActive) templateForm.isActive.checked = true;
+    showAdminStatus('Word шаблонът е качен.');
+    await loadAgentDataForActiveTab('templates');
+  } catch (err) {
+    showAdminStatus(err.message, true);
+  }
+};
 
 const exampleForm = document.getElementById('adminExampleForm');
 if (exampleForm) exampleForm.onsubmit = async (e) => { e.preventDefault(); try { await api(`/api/admin/agents/${adminSelectedAgentId}/examples`, { method: 'POST', body: JSON.stringify({ input_text: exampleForm.input_text.value, output_text: exampleForm.output_text.value, status: exampleForm.status.value }) }); exampleForm.reset(); showAdminStatus('Примерът е добавен.'); await loadAgentDataForActiveTab('examples'); } catch (err) { showAdminStatus(err.message, true); } };
@@ -714,13 +735,13 @@ document.getElementById('adminRefreshAgentBtn').onclick = async () => {
 document.getElementById('adminPanel').addEventListener('click', async (event) => {
   const activateBtn = event.target.closest('[data-activate-prompt]');
   const deleteKnowledgeBtn = event.target.closest('[data-delete-knowledge]');
-  const deleteTemplateBtn = event.target.closest('[data-delete-template]');
+  const deleteDocTemplateBtn = event.target.closest('[data-delete-doc-template]');
   const approveExampleBtn = event.target.closest('[data-approve-example]');
   const rejectExampleBtn = event.target.closest('[data-reject-example]');
   try {
     if (activateBtn) { await api(`/api/admin/prompts/${activateBtn.dataset.activatePrompt}/activate`, { method: 'POST' }); await loadAgentDataForActiveTab('prompts'); showAdminStatus('Промптът е активиран.'); }
     if (deleteKnowledgeBtn) { await api(`/api/admin/knowledge/${deleteKnowledgeBtn.dataset.deleteKnowledge}`, { method: 'DELETE' }); await loadAgentDataForActiveTab('knowledge'); showAdminStatus('Изтрито.'); }
-    if (deleteTemplateBtn) { await api(`/api/admin/templates/${deleteTemplateBtn.dataset.deleteTemplate}`, { method: 'DELETE' }); await loadAgentDataForActiveTab('templates'); showAdminStatus('Изтрито.'); }
+    if (deleteDocTemplateBtn) { await api(`/api/admin/doc-templates/${deleteDocTemplateBtn.dataset.deleteDocTemplate}`, { method: 'DELETE' }); await loadAgentDataForActiveTab('templates'); showAdminStatus('Изтрито.'); }
     if (approveExampleBtn) { await api(`/api/admin/examples/${approveExampleBtn.dataset.approveExample}/approve`, { method: 'POST' }); await loadAgentDataForActiveTab('examples'); showAdminStatus('Одобрен пример.'); }
     if (rejectExampleBtn) { await api(`/api/admin/examples/${rejectExampleBtn.dataset.rejectExample}/reject`, { method: 'POST' }); await loadAgentDataForActiveTab('examples'); showAdminStatus('Отхвърлен пример.'); }
   } catch (err) { showAdminStatus(err.message, true); }
