@@ -143,3 +143,19 @@ aside button.active { background: var(--accent); }
 .agent-knowledge-list { margin:8px 0 0; padding-left:18px; display:flex; flex-direction:column; gap:6px; }
 .agent-knowledge-list li { display:flex; flex-direction:column; gap:2px; }
 .agent-knowledge-list small { opacity:0.75; }
+
+#history { margin-top:8px; }
+.history-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.history-header h4 { margin:0; font-size:14px; font-weight:600; }
+.history-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.history-item { padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:color-mix(in oklab, var(--panel), #8aa0c8 4%); cursor:pointer; transition:background .15s ease,border-color .15s ease; }
+.history-item:hover { background:color-mix(in oklab, var(--panel), var(--accent) 12%); border-color:color-mix(in oklab, var(--accent), white 20%); }
+.history-item.selected { border-color:var(--accent); background:color-mix(in oklab, var(--panel), var(--accent) 20%); }
+
+#sections { display:flex; flex-direction:column; gap:10px; }
+.section-card { border:1px solid var(--border); border-radius:10px; padding:10px; background:color-mix(in oklab, var(--panel), #8aa0c8 6%); }
+.section-title { font-weight:700; display:block; margin-bottom:6px; text-transform:capitalize; }
+
+.section-actions { display:flex; gap:6px; margin-bottom:8px; }
+.section-actions .btn-secondary { padding:4px 8px; font-size:12px; }
+.section-card textarea { width:100%; min-height:120px; line-height:1.45; }

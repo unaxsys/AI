@@ -265,6 +265,179 @@ async function computeOfferPricing({ currency = 'BGN', vatMode = 'standard', ite
   };
 }
 
+
+function buildTaskExportText(task, sections) {
+  const header = [
+    `Task #${task.id}`,
+    `Status: ${task.status}`,
+    `Created: ${task.created_at ? new Date(task.created_at).toISOString() : ''}`,
+    '',
+    'Input:',
+    String(task.input_text || '').trim(),
+    '',
+    'Output:'
+  ];
+  const output = sections.map((row, index) => {
+    const title = String(row.section_type || `section_${index + 1}`).replace(/_/g, ' ').toUpperCase();
+    return `${index + 1}. ${title}\n${String(row.content || '').trim()}`;
+  });
+  return [...header, ...output].join('\n').trim() + '\n';
+}
+
+function escapeXml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function makeCrc32Table() {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let j = 0; j < 8; j += 1) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+}
+
+const CRC32_TABLE = makeCrc32Table();
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buffer.length; i += 1) {
+    crc = CRC32_TABLE[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function createZip(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const now = new Date();
+  const dosTime = ((now.getHours() & 0x1f) << 11) | ((now.getMinutes() & 0x3f) << 5) | ((Math.floor(now.getSeconds() / 2)) & 0x1f);
+  const dosDate = (((now.getFullYear() - 1980) & 0x7f) << 9) | (((now.getMonth() + 1) & 0x0f) << 5) | (now.getDate() & 0x1f);
+
+  entries.forEach(({ name, data }) => {
+    const fileNameBytes = Buffer.from(name, 'utf8');
+    const content = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8');
+    const checksum = crc32(content);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(dosTime, 10);
+    localHeader.writeUInt16LE(dosDate, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(content.length, 18);
+    localHeader.writeUInt32LE(content.length, 22);
+    localHeader.writeUInt16LE(fileNameBytes.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, fileNameBytes, content);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(dosTime, 12);
+    centralHeader.writeUInt16LE(dosDate, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(content.length, 20);
+    centralHeader.writeUInt32LE(content.length, 24);
+    centralHeader.writeUInt16LE(fileNameBytes.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, fileNameBytes);
+
+    offset += localHeader.length + fileNameBytes.length + content.length;
+  });
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(0x06054b50, 0);
+  endRecord.writeUInt16LE(0, 4);
+  endRecord.writeUInt16LE(0, 6);
+  endRecord.writeUInt16LE(entries.length, 8);
+  endRecord.writeUInt16LE(entries.length, 10);
+  endRecord.writeUInt32LE(centralDirectory.length, 12);
+  endRecord.writeUInt32LE(offset, 16);
+  endRecord.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, endRecord]);
+}
+
+function generateDocxBufferFromText(text) {
+  const paragraphs = String(text || '').replace(/\r/g, '').split('\n').map((line) => {
+    if (!line.trim()) return '<w:p/>';
+    return `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`;
+  }).join('');
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14"><w:body>${paragraphs}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+
+  return createZip([
+    { name: '[Content_Types].xml', data: contentTypes },
+    { name: '_rels/.rels', data: rels },
+    { name: 'word/document.xml', data: documentXml }
+  ]);
+}
+
+function generateSimplePdfBuffer(text) {
+  const safe = String(text || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\r/g, '');
+  const lines = safe.split('\n').map((line) => line.slice(0, 110));
+  const content = ['BT', '/F1 11 Tf', '40 800 Td'];
+  lines.forEach((line, idx) => {
+    if (idx > 0) content.push('0 -16 Td');
+    content.push(`(${line || ' '}) Tj`);
+  });
+  content.push('ET');
+  const streamContent = content.join('\n');
+  const objects = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+    `5 0 obj << /Length ${Buffer.byteLength(streamContent, 'utf8')} >> stream\n${streamContent}\nendstream endobj`
+  ];
+  let pdf = '%PDF-1.4\n';
+  const xref = [0];
+  objects.forEach((obj) => {
+    xref.push(Buffer.byteLength(pdf, 'utf8'));
+    pdf += `${obj}\n`;
+  });
+  const xrefStart = Buffer.byteLength(pdf, 'utf8');
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  xref.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return Buffer.from(pdf, 'utf8');
+}
+
 async function getActiveDocTemplate(agentId, templateType) {
   const { rows } = await pool.query(
     `SELECT id, name, template_type, docx_bytes, mime_type, original_filename
@@ -503,6 +676,51 @@ app.patch('/api/tasks/:id/sections', auth, requirePasswordUpdated, async (req, r
   }
   await pool.query('UPDATE tasks SET updated_at=now() WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
+});
+
+
+app.get('/api/tasks/:id/export', auth, requirePasswordUpdated, async (req, res) => {
+  const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
+  const sectionTypeFilter = String(req.query.sectionType || '').trim();
+  const taskResult = await pool.query('SELECT * FROM tasks WHERE id=$1 AND created_by=$2', [req.params.id, req.user.id]);
+  const task = taskResult.rows[0];
+  if (!task) return res.status(404).json({ ok: false, message: 'Task not found' });
+
+  const sections = await pool.query(
+    `SELECT section_type, COALESCE(content_final, content_draft, '') AS content
+     FROM task_sections
+     WHERE task_id=$1
+     ORDER BY id`,
+    [req.params.id]
+  );
+
+  const filteredRows = sectionTypeFilter
+    ? sections.rows.filter((row) => row.section_type === sectionTypeFilter)
+    : sections.rows;
+  if (sectionTypeFilter && !filteredRows.length) {
+    return res.status(404).json({ ok: false, message: 'Section not found' });
+  }
+
+  const text = buildTaskExportText(task, filteredRows);
+  const safeSectionName = sectionTypeFilter ? `_${sectionTypeFilter.replace(/[^a-z0-9_-]/gi, '_')}` : '';
+
+  if (format === 'pdf') {
+    const docxBytes = generateDocxBufferFromText(text);
+    let pdfBytes;
+    try {
+      pdfBytes = await convertToPdf(docxBytes);
+    } catch {
+      pdfBytes = generateSimplePdfBuffer(text);
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=task_${task.id}${safeSectionName}.pdf`);
+    return res.send(pdfBytes);
+  }
+
+  const docxBytes = generateDocxBufferFromText(text);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename=task_${task.id}${safeSectionName}.docx`);
+  return res.send(docxBytes);
 });
 
 app.post('/api/tasks/:id/approve', auth, requirePasswordUpdated, async (req, res) => {

@@ -3,6 +3,9 @@ let currentTab = 'email';
 let currentTaskId = null;
 let mustChangePassword = false;
 let meState = null;
+const historyCache = new Map();
+const selectedTaskByAgent = new Map();
+const collapsedHistoryByAgent = new Map();
 
 const loginView = document.getElementById('loginView');
 const appView = document.getElementById('appView');
@@ -93,6 +96,10 @@ function translateUI(language) {
   document.getElementById('generateDraft').textContent = tr.generateDraft;
   document.getElementById('saveFinal').textContent = tr.saveFinal;
   document.getElementById('approveTask').textContent = tr.approve;
+  const exportDocxBtn = document.getElementById('exportDocx');
+  const exportPdfBtn = document.getElementById('exportPdf');
+  if (exportDocxBtn) exportDocxBtn.textContent = 'Export DOCX';
+  if (exportPdfBtn) exportPdfBtn.textContent = 'Export PDF';
   const historyTitle = document.querySelector('#workspacePanel h3');
   if (historyTitle) historyTitle.textContent = tr.history;
 
@@ -418,7 +425,10 @@ document.querySelectorAll('aside button[data-tab]').forEach((b) => b.onclick = (
   setActiveSidebar();
   updateWorkspaceVisibility();
   hideContextPanels();
-  if (currentTab !== 'admin') loadHistory();
+  if (currentTab !== 'admin') {
+    currentTaskId = selectedTaskByAgent.get(currentTab) || null;
+    loadHistory();
+  }
 });
 
 document.getElementById('createTask').onclick = async () => {
@@ -427,6 +437,7 @@ document.getElementById('createTask').onclick = async () => {
   if (!agent) return alert('Agent disabled/not found');
   const t = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ agentId: agent.id, inputText: taskInput.value }) });
   currentTaskId = t.id;
+  selectedTaskByAgent.set(currentTab, t.id);
   loadHistory();
 };
 
@@ -452,40 +463,141 @@ document.getElementById('approveTask').onclick = async () => {
 
 document.getElementById('refreshHistory').onclick = loadHistory;
 
+function clearSelectedTaskView() {
+  currentTaskId = null;
+  taskInput.value = '';
+  document.getElementById('sections').innerHTML = '';
+}
+
+function historyItemLabel(taskRow) {
+  return `#${taskRow.id} [${taskRow.status}] ${String(taskRow.input_text || '').slice(0, 80)}`;
+}
+
+async function openTaskFromHistory(taskId, agentCode) {
+  if (currentTaskId === taskId) {
+    clearSelectedTaskView();
+    selectedTaskByAgent.delete(agentCode);
+    renderHistoryList(agentCode);
+    return;
+  }
+
+  currentTaskId = taskId;
+  selectedTaskByAgent.set(agentCode, taskId);
+  const data = await api(`/api/tasks/${taskId}`);
+  taskInput.value = data.task.input_text;
+  renderSections(data.sections.map((s) => ({ section_type: s.section_type, content_draft: s.content_final || s.content_draft || '' })));
+  renderHistoryList(agentCode);
+}
+
+function renderHistoryList(agentCode = currentTab) {
+  const container = document.getElementById('history');
+  const rows = historyCache.get(agentCode) || [];
+  const isCollapsed = Boolean(collapsedHistoryByAgent.get(agentCode));
+  container.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'history-header';
+  const title = document.createElement('h4');
+  title.textContent = `${(I18N[currentLanguage]?.tabs?.[agentCode] || agentCode)} (${rows.length})`;
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'btn-secondary';
+  toggleBtn.textContent = isCollapsed ? 'Покажи' : 'Скрий';
+  toggleBtn.onclick = () => {
+    collapsedHistoryByAgent.set(agentCode, !isCollapsed);
+    renderHistoryList(agentCode);
+  };
+  header.appendChild(title);
+  header.appendChild(toggleBtn);
+  container.appendChild(header);
+
+  if (isCollapsed) return;
+
+  const ul = document.createElement('ul');
+  ul.className = 'history-list';
+  rows.forEach((row) => {
+    const li = document.createElement('li');
+    li.className = 'history-item';
+    if (selectedTaskByAgent.get(agentCode) === row.id) li.classList.add('selected');
+    li.textContent = historyItemLabel(row);
+    li.title = 'Клик за отваряне/затваряне';
+    li.onclick = () => openTaskFromHistory(row.id, agentCode);
+    ul.appendChild(li);
+  });
+  container.appendChild(ul);
+}
+
 async function loadHistory() {
   const agents = await api('/api/agents');
   const agent = agents.find((a) => a.code === currentTab);
   if (!agent) return;
   const q = encodeURIComponent(document.getElementById('search').value || '');
   const rows = await api(`/api/tasks?agentId=${agent.id}&q=${q}`);
-  const list = document.getElementById('history');
-  list.innerHTML = '';
-  rows.forEach((r) => {
-    const li = document.createElement('li');
-    li.textContent = `#${r.id} [${r.status}] ${r.input_text.slice(0, 80)}`;
-    li.onclick = async () => {
-      currentTaskId = r.id;
-      const data = await api(`/api/tasks/${r.id}`);
-      taskInput.value = data.task.input_text;
-      renderSections(data.sections.map((s) => ({ section_type: s.section_type, content_draft: s.content_final || s.content_draft || '' })));
-    };
-    list.appendChild(li);
-  });
+  historyCache.set(currentTab, rows);
+
+  const selectedId = selectedTaskByAgent.get(currentTab);
+  if (selectedId && !rows.some((row) => row.id === selectedId)) {
+    clearSelectedTaskView();
+    selectedTaskByAgent.delete(currentTab);
+  }
+
+  renderHistoryList(currentTab);
 }
 
 function renderSections(sections) {
   const el = document.getElementById('sections');
   el.innerHTML = '';
-  sections.forEach((s) => {
+  sections.forEach((s, index) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'section-card';
     const label = document.createElement('label');
-    label.textContent = s.section_type;
+    label.className = 'section-title';
+    label.textContent = `${index + 1}. ${String(s.section_type || '').replace(/_/g, ' ')}`;
+    const actions = document.createElement('div');
+    actions.className = 'section-actions';
+    const exportDocxSectionBtn = document.createElement('button');
+    exportDocxSectionBtn.className = 'btn-secondary';
+    exportDocxSectionBtn.type = 'button';
+    exportDocxSectionBtn.textContent = 'DOCX';
+    exportDocxSectionBtn.onclick = () => exportTask('docx', s.section_type);
+    const exportPdfSectionBtn = document.createElement('button');
+    exportPdfSectionBtn.className = 'btn-secondary';
+    exportPdfSectionBtn.type = 'button';
+    exportPdfSectionBtn.textContent = 'PDF';
+    exportPdfSectionBtn.onclick = () => exportTask('pdf', s.section_type);
+    actions.appendChild(exportDocxSectionBtn);
+    actions.appendChild(exportPdfSectionBtn);
+
     const ta = document.createElement('textarea');
     ta.dataset.section = s.section_type;
     ta.value = s.content_final || s.content_draft || '';
-    el.appendChild(label);
-    el.appendChild(ta);
+    wrap.appendChild(label);
+    wrap.appendChild(actions);
+    wrap.appendChild(ta);
+    el.appendChild(wrap);
   });
 }
+
+
+async function exportTask(format, sectionType = '') {
+  if (!currentTaskId) return alert('Create/open task first');
+  const query = new URLSearchParams({ format });
+  if (sectionType) query.set('sectionType', sectionType);
+  const response = await fetch(`/api/tasks/${currentTaskId}/export?${query.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    return alert(`Export ${format.toUpperCase()} failed`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeSection = sectionType ? `_${sectionType.replace(/[^a-z0-9_-]/gi, '_')}` : '';
+  a.download = `task_${currentTaskId}${safeSection}.${format}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportDocx').onclick = () => exportTask('docx');
+document.getElementById('exportPdf').onclick = () => exportTask('pdf');
 
 document.getElementById('profileForm').onsubmit = async (e) => {
   e.preventDefault();
