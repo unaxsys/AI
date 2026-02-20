@@ -265,6 +265,18 @@ async function computeOfferPricing({ currency = 'BGN', vatMode = 'standard', ite
   };
 }
 
+async function getActiveDocTemplate(agentId, templateType) {
+  const { rows } = await pool.query(
+    `SELECT id, name, template_type, docx_bytes, mime_type, original_filename
+     FROM doc_templates
+     WHERE agent_id=$1 AND template_type=$2 AND is_active=true
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+    [agentId, templateType]
+  );
+  return rows[0] || null;
+}
+
 function sectionsForAgent(code) {
   const map = {
     email: ['reply_short', 'reply_standard', 'reply_detailed'],
@@ -531,6 +543,9 @@ app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
   const inputItems = Array.isArray(req.body.items) ? req.body.items : [];
   const pricing = await computeOfferPricing({ currency, vatMode, items: inputItems });
 
+  const offersAgent = await resolveAgentByKey('offers');
+  const activeTemplate = offersAgent ? await getActiveDocTemplate(offersAgent.id, 'offer') : null;
+
   const offer = await pool.query(
     `INSERT INTO offers(created_by,client_company,client_name,client_email,lead_text,currency,vat_mode,subtotal,vat_amount,total,status,pricing_version_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
@@ -550,6 +565,11 @@ app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
     ]
   );
 
+  if (activeTemplate) {
+    await pool.query('UPDATE offers SET template_id=$1, updated_at=now() WHERE id=$2', [activeTemplate.id, offer.rows[0].id]);
+    offer.rows[0].template_id = activeTemplate.id;
+  }
+
   await pool.query(
     'INSERT INTO offer_sections(offer_id, section_type, content) VALUES ($1,$2,$3),($1,$4,$5)',
     [offer.rows[0].id, 'offer_intro', 'Проектна оферта.', 'pricing', pricing.breakdown]
@@ -561,6 +581,12 @@ app.post('/api/offers', auth, requirePasswordUpdated, async (req, res) => {
 app.post('/api/contracts', auth, requirePasswordUpdated, async (req, res) => {
   const { contractType, clientCompany, clientName, clientEmail } = req.body;
   const r = await pool.query('INSERT INTO contracts(created_by,contract_type,client_company,client_name,client_email,status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.user.id, contractType || 'general', clientCompany, clientName, clientEmail, 'draft']);
+  const contractsAgent = await resolveAgentByKey('contracts');
+  const activeTemplate = contractsAgent ? await getActiveDocTemplate(contractsAgent.id, 'contract') : null;
+  if (activeTemplate) {
+    await pool.query('UPDATE contracts SET template_id=$1, updated_at=now() WHERE id=$2', [activeTemplate.id, r.rows[0].id]);
+    r.rows[0].template_id = activeTemplate.id;
+  }
   await pool.query('INSERT INTO contract_sections(contract_id, section_type, content) VALUES ($1,$2,$3)', [r.rows[0].id, 'contract_summary', 'Contract scaffold ready.']);
   res.status(201).json(r.rows[0]);
 });
@@ -913,6 +939,71 @@ app.get('/api/admin/agents/:id/templates', auth, requirePasswordUpdated, adminOn
   return res.json({ ok: true, templates: rows });
 });
 
+app.get('/api/admin/doc-templates', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const filters = [];
+  const params = [];
+
+  if (req.query.agentId) {
+    const agentId = Number(req.query.agentId);
+    if (!agentId) return badRequest(res, 'Invalid agentId');
+    params.push(agentId);
+    filters.push(`dt.agent_id=$${params.length}`);
+  }
+
+  const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const { rows } = await pool.query(
+    `SELECT dt.id, dt.name, dt.template_type, dt.agent_id, dt.is_active, dt.created_at, dt.original_filename,
+            a.name AS agent_name, a.key AS agent_key
+     FROM doc_templates dt
+     LEFT JOIN agents a ON a.id=dt.agent_id
+     ${whereClause}
+     ORDER BY dt.created_at DESC, dt.id DESC`,
+    params
+  );
+
+  return res.json({ ok: true, templates: rows });
+});
+
+app.post('/api/admin/doc-templates', auth, requirePasswordUpdated, adminOnly, upload.single('templateFile'), async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const templateType = String(req.body.templateType || '').trim().toLowerCase();
+  const agentId = Number(req.body.agentId);
+  const isActive = req.body.isActive === undefined ? true : String(req.body.isActive) === 'true';
+  const file = req.file;
+
+  if (!name) return badRequest(res, 'name is required');
+  if (!agentId) return badRequest(res, 'agentId is required');
+  if (!['offer', 'contract'].includes(templateType)) return badRequest(res, 'templateType must be offer or contract');
+  if (!file) return badRequest(res, 'templateFile is required');
+  if (!/\.docx$/i.test(file.originalname || '')) return badRequest(res, 'Only .docx templates are supported');
+
+  const agent = await pool.query('SELECT id FROM agents WHERE id=$1', [agentId]);
+  if (!agent.rows[0]) return badRequest(res, 'Agent not found');
+
+  if (isActive) {
+    await pool.query('UPDATE doc_templates SET is_active=false WHERE agent_id=$1 AND template_type=$2', [agentId, templateType]);
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO doc_templates(name, template_type, agent_id, is_active, docx_bytes, mime_type, original_filename, created_by)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, name, template_type, agent_id, is_active, created_at, original_filename`,
+    [name, templateType, agentId, isActive, file.buffer, file.mimetype || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file.originalname || null, req.user.id]
+  );
+
+  await writeAgentAudit(agentId, req.user.id, 'upload_doc_template', { templateId: rows[0].id, templateType });
+  return res.status(201).json({ ok: true, template: rows[0] });
+});
+
+app.delete('/api/admin/doc-templates/:id', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return badRequest(res, 'Invalid template id');
+  const { rows } = await pool.query('DELETE FROM doc_templates WHERE id=$1 RETURNING id,agent_id', [id]);
+  if (!rows[0]) return res.status(404).json({ ok: false, message: 'Template not found' });
+  await writeAgentAudit(rows[0].agent_id, req.user.id, 'delete_doc_template', { templateId: id });
+  return res.json({ ok: true });
+});
+
 app.post('/api/admin/agents/:id/templates', auth, requirePasswordUpdated, adminOnly, async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return badRequest(res, 'Invalid agent id');
@@ -1211,7 +1302,14 @@ async function convertToPdf(docxBuffer) {
 
 app.post('/api/offers/:id/export', auth, requirePasswordUpdated, async (req, res) => {
   const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
-  const docx = await generateDocxStub('offer', req.params.id);
+  const linkedTemplate = await pool.query(
+    `SELECT dt.docx_bytes
+     FROM offers o
+     JOIN doc_templates dt ON dt.id=o.template_id
+     WHERE o.id=$1`,
+    [req.params.id]
+  );
+  const docx = linkedTemplate.rows[0]?.docx_bytes || await generateDocxStub('offer', req.params.id);
   let bytes = docx;
   let mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (format === 'pdf') {
@@ -1224,7 +1322,14 @@ app.post('/api/offers/:id/export', auth, requirePasswordUpdated, async (req, res
 
 app.post('/api/contracts/:id/export', auth, requirePasswordUpdated, async (req, res) => {
   const format = req.query.format === 'pdf' ? 'pdf' : 'docx';
-  const docx = await generateDocxStub('contract', req.params.id);
+  const linkedTemplate = await pool.query(
+    `SELECT dt.docx_bytes
+     FROM contracts c
+     JOIN doc_templates dt ON dt.id=c.template_id
+     WHERE c.id=$1`,
+    [req.params.id]
+  );
+  const docx = linkedTemplate.rows[0]?.docx_bytes || await generateDocxStub('contract', req.params.id);
   let bytes = docx;
   let mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (format === 'pdf') {
